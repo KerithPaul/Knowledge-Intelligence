@@ -1,0 +1,58 @@
+# Secrets and local env
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+wheels/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Tests and coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.hypothesis/
+.tox/
+.nox/
+
+# Generated artifacts
+data/processed/**
+data/evaluation/**
+!data/processed/.gitkeep
+!data/evaluation/.gitkeep
+# Hand-checked retrieval labels. The report next to this file stays ignored.
+!data/evaluation/retrieval_golden.jsonl
+
+# Model and tool caches, if pointed at the repo
+.cache/
+models/
+.codegraph/
+
+# Qdrant data if a bind mount is used later
+qdrant_storage/
+
+# Editors and OS
+.idea/
+.ipynb_checkpoints/
+*.log
+Thumbs.db
+Desktop.ini
+.DS_Store

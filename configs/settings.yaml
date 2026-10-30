@@ -1,0 +1,82 @@
+# Tunables only. API keys live in .env and must not be copied here.
+# Env vars override this file. Nested keys use a double underscore:
+# LLM__MODEL=openai/gpt-oss-120b
+
+llm:
+  provider: groq
+  # Fast production model on the Groq developer plan. Swap to
+  # openai/gpt-oss-120b when answer quality matters more than speed.
+  model: openai/gpt-oss-20b
+  base_url: https://api.groq.com/openai/v1
+  # Low, so later grounded answers stay steady. Groq turns 0 into a tiny
+  # positive number, so 0.2 is the explicit setting.
+  temperature: 0.2
+  max_tokens: 512
+  timeout_seconds: 60
+  # gpt-oss always reasons. "low" keeps eval loops cheap. Set either value
+  # to null to stop sending that field (needed for a non-reasoning model).
+  reasoning_effort: low
+  include_reasoning: false
+
+embeddings:
+  provider: bge
+  model: BAAI/bge-small-en-v1.5
+  dimension: 384
+  # Official BGE instruction for short-query to passage search.
+  # Passages are embedded with no instruction.
+  query_prefix: "Represent this sentence for searching relevant passages: "
+  passage_prefix: ""
+  batch_size: 32
+  normalize: true
+  device: cpu
+
+# Local cross-encoder. One probability per query-chunk pair, after sigmoid.
+# Passages longer than max_length are truncated by the reranker.
+reranker:
+  model: BAAI/bge-reranker-base
+  device: cpu
+  batch_size: 16
+  max_length: 512
+
+chunking:
+  # Budget for the string the embedder will see, including special tokens
+  # and the passage prefix. bge-small-en-v1.5 truncates past 512.
+  # Code fences, tables, and admonitions are not cut to hit this size.
+  chunk_size_tokens: 512
+  chunk_overlap_tokens: 64
+
+retrieval:
+  # Dense search and BM25 each return this many hits. RRF keeps this many
+  # for the reranker.
+  top_n: 20
+  # How many reranked chunks are returned.
+  top_k: 5
+  # RRF adds 1 / (rrf_k + rank). Rank starts at 1.
+  rrf_k: 60
+  # Lucene BM25. k1 saturates repeated terms. b is the length penalty.
+  bm25_k1: 1.2
+  bm25_b: 0.75
+
+routing:
+  sufficiency_threshold: 0.35
+
+qdrant:
+  url: http://localhost:6333
+  collection: knowledge
+  dense_vector: dense
+  sparse_vector: sparse
+  distance: cosine
+  # HNSW graph. m is edges per node. ef_construct is how many neighbors
+  # the build looks at. ef_search is the same knob when a query runs.
+  hnsw_m: 16
+  hnsw_ef_construct: 100
+  hnsw_ef_search: 128
+  # These two are kilobytes, not point counts. Qdrant's defaults
+  # (20000 and 10000) leave a few hundred chunks on a brute-force scan.
+  # The server rejects a full-scan threshold below 10. 10 KB is still
+  # under this corpus, so search builds the graph and uses it.
+  # indexing_threshold_kb of 0 would turn the graph off.
+  indexing_threshold_kb: 1
+  full_scan_threshold_kb: 10
+  upsert_batch_size: 64
+  timeout_seconds: 30

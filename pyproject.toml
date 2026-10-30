@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# Install the CPU build of torch before this package. A plain pip install of
+# sentence-transformers can pull a multi-gigabyte CUDA wheel. See AGENT.md.
+[project]
+name = "knowledge-intelligence"
+version = "0.1.0"
+description = "Learning-focused RAG system over a documentation corpus."
+readme = "IMPLEMENTATION_PLAN.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy>=1.26",
+    "openai>=1.50",
+    "pydantic>=2.10",
+    "pydantic-settings[yaml]>=2.6",
+    # Same release as the Qdrant image in docker-compose.yml (v1.20.0).
+    "qdrant-client>=1.20,<1.21",
+    "sentence-transformers>=3.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit>=4.0",
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-m 'not smoke'"
+markers = [
+    "smoke: calls Groq or loads a local BGE model",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["rag"]
