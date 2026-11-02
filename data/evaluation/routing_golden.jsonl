@@ -1,0 +1,15 @@
+{"query": "How do I force the LINE adapter to always use the paid Push fallback?", "corpus_can_answer": true}
+{"query": "How does Zed launch the Hermes ACP adapter from its registry?", "corpus_can_answer": true}
+{"query": "How does the ACP permission bridge translate a one-time terminal approval into a Hermes decision?", "corpus_can_answer": true}
+{"query": "What is preserved when an ACP session is forked into a new live session?", "corpus_can_answer": true}
+{"query": "Which subsystem handles OAuth for model providers and resolves aliases?", "corpus_can_answer": true}
+{"query": "What security checks run on context files before they enter the prompt?", "corpus_can_answer": true}
+{"query": "Which class owns prompt assembly, tool dispatch, and failover when a provider fails?", "corpus_can_answer": true}
+{"query": "When does the agent loop stop and wait for the user before executing a tool?", "corpus_can_answer": true}
+{"query": "How do I make the Bedrock client sign requests with SigV4 instead of an environment bearer token?", "corpus_can_answer": true}
+{"query": "Why does the tool runner refuse image generation when response storage is disabled?", "corpus_can_answer": true}
+{"query": "How does a memory plugin register its provider during discovery?", "corpus_can_answer": true}
+{"query": "What is the boiling point of water at sea level in degrees Celsius?", "corpus_can_answer": false}
+{"query": "Which planet is the largest in Earth's solar system?", "corpus_can_answer": false}
+{"query": "How many players are on the field for one soccer team during a standard match?", "corpus_can_answer": false}
+{"query": "What year was the Eiffel Tower completed?", "corpus_can_answer": false}

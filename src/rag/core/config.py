@@ -107,6 +107,13 @@ class GenerationSettings(BaseModel):
 
 
 class RoutingSettings(BaseModel):
+    """When the best rerank probability is too low to call the model.
+
+    ``sufficiency_threshold`` is compared with that probability. A lower
+    score returns the insufficient-context sentence and does not call Groq.
+    The value is from 0 to 1 because the rerank score is a probability.
+    """
+
     sufficiency_threshold: float = Field(ge=0.0, le=1.0)
 
 

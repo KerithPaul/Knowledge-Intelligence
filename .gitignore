@@ -38,8 +38,9 @@ data/processed/**
 data/evaluation/**
 !data/processed/.gitkeep
 !data/evaluation/.gitkeep
-# Hand-checked retrieval labels. The report next to this file stays ignored.
+# Hand-checked retrieval and routing labels. Reports next to them stay ignored.
 !data/evaluation/retrieval_golden.jsonl
+!data/evaluation/routing_golden.jsonl
 
 # Model and tool caches, if pointed at the repo
 .cache/

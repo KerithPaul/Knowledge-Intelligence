@@ -68,6 +68,10 @@ generation:
   relevance_questions: 3
 
 routing:
+  # Best cross-encoder probability required before the model is called.
+  # The reranker score is in (0, 1). Below this, the ask path returns the
+  # insufficient-context sentence and does not call Groq. 0.35 is a starting
+  # knob. python -m rag.routing --eval is how to judge it.
   sufficiency_threshold: 0.35
 
 qdrant:

@@ -1,10 +1,12 @@
 # Knowledge Intelligence — Implementation Plan
 
 > A production-grade, learning-focused RAG system over a documentation corpus
-> (Hermes internals + OpenAI SDK docs). Answers **from the indexed docs only**,
-> and **falls back to the web (Tavily)** when the knowledge base can't answer.
+> (Hermes internals + OpenAI SDK docs). Answers **from the indexed docs only**.
+> When the sufficiency gate says those docs are not enough, it says so.
+> Web search is deferred until a later agent tool.
 
-**Status:** Phase 0 through Phase 4 are in the tree. Phases 5–8 are not started.
+**Status:** Phase 0 through the Phase 5 sufficiency gate are in the tree.
+Web search is deferred. Phases 6–8 are not started.
 **Created:** 2026-10-26
 **Primary goal:** Understand *every method* at each RAG stage — with special
 emphasis on **evaluation** and **production-grade implementation**. Core
@@ -22,7 +24,7 @@ established frameworks.
 | **Reranker** | Local cross-encoder `bge-reranker-base` | Teaches the retrieve → rerank production pattern |
 | **Vector store** | **Qdrant** (Docker) | Dense + sparse (hybrid) in one engine, payload filtering, fits Docker target |
 | **Keyword search** | Hand-built BM25, fused with dense via **Reciprocal Rank Fusion (RRF)** | Learn sparse vs dense and fusion from first principles |
-| **Web fallback** | Tavily + content fetch/clean | LLM-optimized search API |
+| **Web fallback** | Deferred | The Phase 5 gate does not search the web. A later agent tool can. |
 | **Serving** | FastAPI + Docker Compose (app + Qdrant) | Canonical production shape |
 | **Evaluation** | From-scratch metrics, cross-checked against RAGAS/DeepEval | The centerpiece of the learning goal |
 | **Runtime** | Dedicated **Python 3.12** venv | System Python 3.15.1 has no ML wheels yet; Hermes runs on its own bundled 3.14.9 (unrelated) |
@@ -40,9 +42,10 @@ query
   → dense search (Qdrant)      │→ RRF fusion → top-N
   → BM25 search ───────────────┘
       → cross-encoder rerank → top-k
-          → SUFFICIENCY GATE (retrieval score + LLM groundedness check)
-              ├─ sufficient → generate grounded answer + citations (Groq)
-              └─ insufficient → Tavily web search → fetch/clean → generate → label source=web
+          → SUFFICIENCY GATE (best rerank probability, then the grounded answer)
+              ├─ score below threshold → insufficient-context sentence (no model call)
+              └─ score passes → grounded answer + citations (Groq)
+                    └─ model says not enough, or cites nothing → same sentence
   → trace object (chunks, scores, routing decision, tokens, latency) → logged
 ```
 
@@ -59,7 +62,7 @@ src/rag/
   embeddings/  EmbeddingClient (BGE) + batching/prefixing
   retrieval/   dense, bm25, hybrid(RRF), rerank, filters
   generation/  LLMClient (Groq), prompt assembly, citations, grounding
-  routing/     sufficiency gate + Tavily web fallback            (new)
+  routing/     sufficiency gate (score, then groundedness)       P5
   evaluation/  datasets, retrieval metrics, gen metrics, runners, reports
   serving/     FastAPI app, schemas, tracing/logging             (new)
   core/        config (pydantic-settings), trace model, interfaces (new)
@@ -106,16 +109,27 @@ Evaluation is a first-class concern at **every** phase, not only Phase 6.
 - **Learn:** grounded prompting & citation. **Measure:** faithfulness, answer
   relevance.
 
-### Phase 5 — Routing & Web Fallback
-- Two-stage sufficiency gate: cheap retrieval-score threshold → LLM groundedness
-  check.
-- Tavily search → fetch + clean → re-ground on web content → source labeling.
-- **Learn:** adaptive/corrective RAG. **Measure:** router accuracy,
-  false-fallback & missed-fallback rates.
+### Phase 5 — Routing
+- Two-stage sufficiency gate. Compare the best rerank probability to
+  `routing.sufficiency_threshold`. A lower score does not call the model.
+  A passing score uses the Phase 4 grounded answer, and
+  `GroundedAnswer.sufficient` is the groundedness check.
+- Web search is not part of this phase. The insufficient route is the
+  Phase 4 sentence. A later agent can call its own web-search tool from
+  that result.
+- **Learn:** corrective RAG (judge the retrieval, then answer).
+  **Measure:** `python -m rag.routing --eval` reports decision accuracy,
+  false-fallback, and missed-fallback on
+  `data/evaluation/routing_golden.jsonl`.
+- **Exit:** `python -m rag.routing` returns a cited answer or the
+  insufficient-context sentence. The answerable labels are the Phase 3
+  retrieval questions. A few hand-checked questions the corpus cannot
+  answer supply the other class. Phase 6 grows the set.
 
 ### Phase 6 — Evaluation Harness (centerpiece)
-- Synthetic golden Q/A generated from the corpus + hand-written "needs-web"
-  questions (to test routing).
+- Synthetic golden Q/A generated from the corpus. Phase 5 already has a
+  small routing set. Phase 6 grows it, including more questions the corpus
+  cannot answer.
 - From-scratch metrics (§5); then cross-check against RAGAS/DeepEval and
   reconcile divergences.
 - Eval CLI + reports written to `data/evaluation/`; regression gating.
@@ -136,7 +150,10 @@ Evaluation is a first-class concern at **every** phase, not only Phase 6.
 - **Retrieval:** Precision@k, Recall@k, Hit@k, MRR, nDCG@k, MAP.
 - **Generation:** Faithfulness/groundedness (claim-level LLM-judge), Answer
   Relevance, Context Precision, Context Recall, Answer Correctness vs golden.
-- **Routing:** KB-vs-web decision accuracy, false-fallback & missed-fallback rates.
+- **Routing:** decision accuracy, false-fallback, and missed-fallback.
+  The decision is knowledge-base versus insufficient. False fallback means
+  the corpus can answer and the gate refused. Missed fallback means the
+  corpus cannot answer and the gate still answered from it.
 - **Operational:** per-stage latency, tokens/cost, end-to-end win-rate.
 - **Cross-check:** same data through RAGAS/DeepEval → explain any divergence.
 

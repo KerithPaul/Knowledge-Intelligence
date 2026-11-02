@@ -23,7 +23,7 @@ knowledge-intelligence/
 │   │   ├── hermes/          ← 9 docs, YAML frontmatter (title/description/sidebar_position)
 │   │   └── openai_sdk/      ← 4 docs, PLAIN markdown, NO frontmatter  ⚠ parse both cases
 │   ├── processed/           ← chunks.jsonl, chunk_stats.json, index_stats.json (generated)
-│   └── evaluation/          ← retrieval_golden.jsonl (hand-checked). --eval reports are generated.
+│   └── evaluation/          ← retrieval_golden.jsonl and routing_golden.jsonl (hand-checked). --eval reports are generated.
 ├── src/rag/                 ← application code (see §2)
 └── tests/                   ← pytest suite, mirrors src/rag/
 ```
@@ -40,7 +40,7 @@ knowledge-intelligence/
 | `indexing/` | `indexer.py`, `store.py`, `sparse.py`, `records.py` — batch-embed and upsert Qdrant | P2 |
 | `retrieval/` | `pipeline.py`, `dense.py`, `bm25.py`, `fusion.py`, `rerank.py`, `filters.py` — dense search, BM25, RRF, rerank | P3 |
 | `generation/` | `groq.py`, `pipeline.py`, `context.py`, `prompt.py`, `parse.py`, `types.py` — Groq client, numbered context, citations, insufficient-context signal | P0 client; P4 grounding |
-| `routing/` *(new)* | two-stage sufficiency gate + Tavily web fallback + source labeling | P5 |
+| `routing/` | `pipeline.py`, `types.py` — best rerank score, then the grounded answer. No web search | P5 |
 | `evaluation/` | `retrieval.py`, `golden.py`, `generation.py` — retrieval metrics, the Phase 3 question file, faithfulness, and answer relevance. Context precision, context recall, and answer correctness remain P6 | P3 retrieval; P4 generation scores; P6 runners |
 | `serving/` *(new)* | FastAPI app (`/ask` `/ingest` `/health`), schemas, tracing/logging | P7 |
 
@@ -55,9 +55,10 @@ query
   → dense search (Qdrant)     │→ RRF fusion → top-N
   → BM25 search ──────────────┘
       → cross-encoder rerank → top-k
-          → SUFFICIENCY GATE (retrieval score + LLM groundedness check)
-              ├─ sufficient   → grounded answer + citations (Groq)
-              └─ insufficient → Tavily search → fetch/clean → generate → source=web
+          → SUFFICIENCY GATE (best rerank probability, then the grounded answer)
+              ├─ score below threshold → insufficient-context sentence (no model call)
+              └─ score passes → grounded answer + citations (Groq)
+                    └─ model says not enough, or cites nothing → same sentence
   → trace (chunks, scores, routing decision, tokens, latency) → logged
 ```
 
@@ -89,6 +90,13 @@ query
   sentence and do not keep the model's extra text. `--score` reports
   faithfulness and answer relevance. Both questions in answer relevance are
   embedded with the query prefix.
+- **The ask path** is `python -m rag.routing`. It calls the model only when
+  the best rerank probability is at least `routing.sufficiency_threshold`
+  (settings.yaml: 0.35). Otherwise it returns the same insufficient-context
+  sentence. A passing score still returns that sentence when the grounded
+  answer says the context is not enough. `python -m rag.generation` does
+  not apply this score gate. Web search is not called. `--eval` scores
+  `routing_golden.jsonl`: accuracy, false-fallback, and missed-fallback.
 - **HNSW thresholds in `configs/settings.yaml` are kilobytes.** Full scan is
   `10` because the server rejects anything smaller, and that is still under
   this corpus, so it builds a graph. Qdrant's own defaults would brute-force it.

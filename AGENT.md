@@ -9,8 +9,9 @@
 ## 1. What this project is
 
 A production-grade, **learning-focused RAG system** over a documentation corpus
-(Hermes internals + OpenAI SDK docs). It answers **only from the indexed docs**,
-and **falls back to the web (Tavily)** when the knowledge base is insufficient.
+(Hermes internals + OpenAI SDK docs). It answers **only from the indexed docs**.
+When the sufficiency gate says those docs are not enough, it says so. Web search
+is deferred until a later agent tool.
 
 The authoritative spec is **`IMPLEMENTATION_PLAN.md`** — stack, query flow, module
 layout, phased plan, and evaluation methods. Read it before any non-trivial change.
@@ -31,6 +32,14 @@ into a grounded answer. `python -m rag.generation` asks Groq for a JSON
 answer with citations. An empty retrieval, a model refusal, or a sufficient
 answer that cites nothing all return the same insufficient-context sentence.
 `python -m rag.generation --score` adds faithfulness and answer relevance.
+Phase 5 is the ask path. `python -m rag.routing` retrieves, compares the
+best rerank probability with `routing.sufficiency_threshold`, and calls
+the Phase 4 generator only when the score passes. A lower score, a model
+refusal, or an uncited answer all return the insufficient-context sentence.
+There is no web search. `python -m rag.routing --eval` scores
+`data/evaluation/routing_golden.jsonl` for decision accuracy, false-fallback,
+and missed-fallback. The answerable rows are the Phase 3 retrieval questions.
+Four hand-checked questions sit outside this corpus. Phase 6 grows the set.
 The API is still empty.
 
 ---
@@ -87,6 +96,8 @@ The API is still empty.
 # score the retrieval set  .\.venv\Scripts\python.exe -m rag.retrieval --eval
 # answer one question      .\.venv\Scripts\python.exe -m rag.generation "your question"
 # score that answer        .\.venv\Scripts\python.exe -m rag.generation --score "your question"
+# ask through the gate     .\.venv\Scripts\python.exe -m rag.routing "your question"
+# score the routing set    .\.venv\Scripts\python.exe -m rag.routing --eval
 # run API (Phase 7)        not built yet
 ```
 > Keep this block in sync with reality. An agent that can't find the real command
@@ -105,7 +116,8 @@ See **`MAP.md`** for the full index. The short version:
   (4 docs, **plain markdown, no frontmatter** — handle both cases in parsing).
 - `data/processed/` — parsed/chunked artifacts (generated; don't hand-edit).
 - `data/evaluation/` — `retrieval_golden.jsonl` is the hand-checked Phase 3 set.
-  Reports from `--eval` are generated and gitignored. Phase 6 grows the set.
+  `routing_golden.jsonl` is the hand-checked Phase 5 set. Reports from `--eval`
+  are generated and gitignored. Phase 6 grows both sets.
 - `tests/` — pytest suite, mirrors `src/rag/` layout.
 
 ---
@@ -147,7 +159,12 @@ See **`MAP.md`** for the full index. The short version:
       `python -m rag.generation --score` reports faithfulness (supported claims
       divided by claims) and answer relevance (mean cosine of questions written
       from the answer, or 0 when every question is noncommittal).
-- [ ] **P5 Routing** — sufficiency gate (score threshold → LLM groundedness) + Tavily fallback.
+- [x] **P5 Routing** — sufficiency gate (best rerank score, then the grounded
+      answer's `sufficient` flag). Web search is deferred.
+      *Exit:* `python -m rag.routing` returns a cited answer or the
+      insufficient-context sentence. `python -m rag.routing --eval` reports
+      decision accuracy, false-fallback, and missed-fallback on
+      `data/evaluation/routing_golden.jsonl`.
 - [ ] **P6 Evaluation** — golden set, from-scratch metrics, cross-check vs RAGAS/DeepEval.
 - [ ] **P7 Serving** — FastAPI `/ask` `/ingest` `/health`, tracing, Dockerfile+Compose.
 - [ ] **P8 Advanced (optional)** — HyDE/multi-query, semantic cache, guardrails, Langfuse.
