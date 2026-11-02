@@ -1,7 +1,7 @@
 """A small trace of one request.
 
-Later phases append retrieval, rerank, and routing spans to the same object.
-Spans store timings and plain attributes. They do not store prompts or secrets.
+Spans store timings and plain attributes. They do not store prompts, answers,
+or secrets.
 """
 
 from dataclasses import dataclass, field

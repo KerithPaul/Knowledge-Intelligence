@@ -89,6 +89,23 @@ class RetrievalSettings(BaseModel):
         return self
 
 
+class GenerationSettings(BaseModel):
+    """How many chunks go into the prompt, and how answer relevance is scored.
+
+    `max_context_chunks` is how many retrieved chunks are copied into the
+    prompt, best first. `max_tokens` is the completion budget for that JSON
+    answer. On gpt-oss, reasoning tokens count against the same budget, so
+    this is larger than the short-call default on the LLM client.
+
+    Answer relevance writes `relevance_questions` questions from the answer
+    and averages their cosine similarity to the user question.
+    """
+
+    max_context_chunks: int = Field(default=5, gt=0)
+    max_tokens: int = Field(default=1024, gt=0)
+    relevance_questions: int = Field(default=3, gt=0)
+
+
 class RoutingSettings(BaseModel):
     sufficiency_threshold: float = Field(ge=0.0, le=1.0)
 
@@ -144,6 +161,7 @@ class Settings(BaseSettings):
     reranker: RerankerSettings
     chunking: ChunkingSettings
     retrieval: RetrievalSettings
+    generation: GenerationSettings = Field(default_factory=GenerationSettings)
     routing: RoutingSettings
     qdrant: QdrantSettings
 

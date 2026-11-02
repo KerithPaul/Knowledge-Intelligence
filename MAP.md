@@ -39,9 +39,9 @@ knowledge-intelligence/
 | `embeddings/` | `bge.py` — `BGEEmbeddingClient` (query prefix, passage prefix, batch size) | P0; indexing calls it |
 | `indexing/` | `indexer.py`, `store.py`, `sparse.py`, `records.py` — batch-embed and upsert Qdrant | P2 |
 | `retrieval/` | `pipeline.py`, `dense.py`, `bm25.py`, `fusion.py`, `rerank.py`, `filters.py` — dense search, BM25, RRF, rerank | P3 |
-| `generation/` | `groq.py` — `GroqLLMClient`. Prompt assembly, citations, and the "insufficient" signal come later | P0; prompting in P4 |
+| `generation/` | `groq.py`, `pipeline.py`, `context.py`, `prompt.py`, `parse.py`, `types.py` — Groq client, numbered context, citations, insufficient-context signal | P0 client; P4 grounding |
 | `routing/` *(new)* | two-stage sufficiency gate + Tavily web fallback + source labeling | P5 |
-| `evaluation/` | `retrieval.py`, `golden.py` — retrieval metrics and the Phase 3 question file. Generation metrics remain P6 | P3 metrics; P6 runners |
+| `evaluation/` | `retrieval.py`, `golden.py`, `generation.py` — retrieval metrics, the Phase 3 question file, faithfulness, and answer relevance. Context precision, context recall, and answer correctness remain P6 | P3 retrieval; P4 generation scores; P6 runners |
 | `serving/` *(new)* | FastAPI app (`/ask` `/ingest` `/health`), schemas, tracing/logging | P7 |
 
 > When you create one of these, replace its row's phase note with the key entry-point
@@ -83,6 +83,12 @@ query
 - **Retrieval questions** live in `data/evaluation/retrieval_golden.jsonl`.
   Each row has an `evidence` string that must appear only in the labeled chunks.
   `python -m rag.retrieval --eval` writes `retrieval_report.json` beside it.
+- **Grounded answers** cite numbered context blocks. `sufficient` is false when
+  retrieval returns nothing, when the model says the context is not enough, or
+  when a claimed answer cites no real block. Those three cases use one fixed
+  sentence and do not keep the model's extra text. `--score` reports
+  faithfulness and answer relevance. Both questions in answer relevance are
+  embedded with the query prefix.
 - **HNSW thresholds in `configs/settings.yaml` are kilobytes.** Full scan is
   `10` because the server rejects anything smaller, and that is still under
   this corpus, so it builds a graph. Qdrant's own defaults would brute-force it.

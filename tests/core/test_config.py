@@ -140,6 +140,9 @@ def test_repo_yaml_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert settings.retrieval.rrf_k == 60
     assert settings.retrieval.bm25_k1 == 1.2
     assert settings.retrieval.bm25_b == 0.75
+    assert settings.generation.max_context_chunks == 5
+    assert settings.generation.max_tokens == 1024
+    assert settings.generation.relevance_questions == 3
     assert settings.reranker.model == "BAAI/bge-reranker-base"
     assert settings.reranker.device == "cpu"
     assert settings.reranker.batch_size == 16
@@ -167,6 +170,20 @@ def test_top_k_cannot_exceed_the_candidate_pool(
     env_file = _write(tmp_path, ".env", "")
     with pytest.raises(ValidationError):
         load_settings(yaml_file=yaml_file, env_file=env_file)
+
+
+def test_context_chunk_limit_must_be_positive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_env(monkeypatch)
+    yaml_file = _write(tmp_path, "settings.yaml", _YAML)
+    env_file = _write(tmp_path, ".env", "")
+    with pytest.raises(ValidationError):
+        load_settings(
+            yaml_file=yaml_file,
+            env_file=env_file,
+            generation={"max_context_chunks": 0},
+        )
 
 
 def test_overlap_cannot_be_negative(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

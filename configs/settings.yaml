@@ -57,6 +57,16 @@ retrieval:
   bm25_k1: 1.2
   bm25_b: 0.75
 
+generation:
+  # How many reranked chunks are copied into the prompt, best first.
+  max_context_chunks: 5
+  # Completion budget for the grounded JSON answer. gpt-oss spends part of
+  # this on reasoning tokens, so it is larger than llm.max_tokens.
+  max_tokens: 1024
+  # Questions written from the answer when measuring answer relevance.
+  # The score is their mean cosine similarity to the user question.
+  relevance_questions: 3
+
 routing:
   sufficiency_threshold: 0.35
 

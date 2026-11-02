@@ -4,7 +4,7 @@
 > (Hermes internals + OpenAI SDK docs). Answers **from the indexed docs only**,
 > and **falls back to the web (Tavily)** when the knowledge base can't answer.
 
-**Status:** Phase 0 through Phase 3 are in the tree. Phases 4–8 are not started.
+**Status:** Phase 0 through Phase 4 are in the tree. Phases 5–8 are not started.
 **Created:** 2026-10-26
 **Primary goal:** Understand *every method* at each RAG stage — with special
 emphasis on **evaluation** and **production-grade implementation**. Core

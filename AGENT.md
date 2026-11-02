@@ -26,7 +26,12 @@ Sparse vectors are raw term counts. A second run upserts the same point ids
 and deletes chunks that left the corpus. Phase 3 searches that collection:
 dense Qdrant search, hand-built BM25, RRF, then `BAAI/bge-reranker-base`.
 `python -m rag.retrieval` answers one question. `python -m rag.retrieval --eval`
-scores `data/evaluation/retrieval_golden.jsonl`. The API is still empty.
+scores `data/evaluation/retrieval_golden.jsonl`. Phase 4 turns those chunks
+into a grounded answer. `python -m rag.generation` asks Groq for a JSON
+answer with citations. An empty retrieval, a model refusal, or a sufficient
+answer that cites nothing all return the same insufficient-context sentence.
+`python -m rag.generation --score` adds faithfulness and answer relevance.
+The API is still empty.
 
 ---
 
@@ -80,6 +85,8 @@ scores `data/evaluation/retrieval_golden.jsonl`. The API is still empty.
 # index into Qdrant        .\.venv\Scripts\python.exe -m rag.indexing
 # search one question      .\.venv\Scripts\python.exe -m rag.retrieval "your question"
 # score the retrieval set  .\.venv\Scripts\python.exe -m rag.retrieval --eval
+# answer one question      .\.venv\Scripts\python.exe -m rag.generation "your question"
+# score that answer        .\.venv\Scripts\python.exe -m rag.generation --score "your question"
 # run API (Phase 7)        not built yet
 ```
 > Keep this block in sync with reality. An agent that can't find the real command
@@ -133,7 +140,13 @@ See **`MAP.md`** for the full index. The short version:
       *Exit:* `python -m rag.retrieval --eval` scores `data/evaluation/retrieval_golden.jsonl`
       with Precision@k, Recall@k, Hit@k, MRR, nDCG@k, and MAP. The starter set is
       hand-checked. Phase 6 grows it.
-- [ ] **P4 Generation** — grounded context + citations + explicit "insufficient" signal.
+- [x] **P4 Generation** — context assembly with citations, a JSON answer, and an
+      explicit insufficient-context signal when the chunks are empty, the model
+      says the context is not enough, or a claimed answer cites nothing.
+      *Exit:* `python -m rag.generation` answers from retrieved chunks.
+      `python -m rag.generation --score` reports faithfulness (supported claims
+      divided by claims) and answer relevance (mean cosine of questions written
+      from the answer, or 0 when every question is noncommittal).
 - [ ] **P5 Routing** — sufficiency gate (score threshold → LLM groundedness) + Tavily fallback.
 - [ ] **P6 Evaluation** — golden set, from-scratch metrics, cross-check vs RAGAS/DeepEval.
 - [ ] **P7 Serving** — FastAPI `/ask` `/ingest` `/health`, tracing, Dockerfile+Compose.

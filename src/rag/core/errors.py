@@ -1,4 +1,4 @@
-"""Errors for config, the model clients, indexing, and retrieval."""
+"""Errors for config, the model clients, indexing, retrieval, and generation."""
 
 
 class ConfigError(Exception):
@@ -27,3 +27,7 @@ class IndexingError(Exception):
 
 class RetrievalError(Exception):
     """Search could not run, or the collection does not match the chunk file."""
+
+
+class GenerationError(Exception):
+    """The model reply could not be read as the JSON object we asked for."""
