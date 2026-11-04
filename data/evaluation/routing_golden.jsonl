@@ -13,3 +13,12 @@
 {"query": "Which planet is the largest in Earth's solar system?", "corpus_can_answer": false}
 {"query": "How many players are on the field for one soccer team during a standard match?", "corpus_can_answer": false}
 {"query": "What year was the Eiffel Tower completed?", "corpus_can_answer": false}
+{"query": "Which environment variable override accepts a provider id in the Hermes inference resolver?", "corpus_can_answer": true}
+{"query": "Where is a new built-in tool listed so batch processing includes it?", "corpus_can_answer": true}
+{"query": "What is the duckduckgo-search skill an example of in the skill format?", "corpus_can_answer": true}
+{"query": "Which file remains the authority for coordinated disclosure in the OpenAI SDK security model?", "corpus_can_answer": true}
+{"query": "Which filter type does openai.types export next to ChatModel?", "corpus_can_answer": true}
+{"query": "What role do mitochondria play in a living cell?", "corpus_can_answer": false}
+{"query": "How does photosynthesis store energy from sunlight?", "corpus_can_answer": false}
+{"query": "Which plays did Shakespeare write besides the tragedies?", "corpus_can_answer": false}
+{"query": "What does the Pythagorean theorem say about the sides of a right triangle?", "corpus_can_answer": false}

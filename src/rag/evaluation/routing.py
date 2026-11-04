@@ -11,10 +11,10 @@ Missed fallback is the share of unanswerable questions the gate still
 answered from the knowledge base. A rate is missing when that class
 has no questions, because the ratio would divide by zero.
 
-The starter labels live in ``routing_golden.jsonl``. The answerable
-questions are the Phase 3 retrieval questions. The unanswerable
-questions were checked against ``data/raw`` and are outside this corpus.
-Phase 6 grows the set.
+The labels live in ``routing_golden.jsonl``. The answerable questions are
+the retrieval questions. The unanswerable questions were checked against
+``data/raw`` and are outside this corpus. ``qa_golden.jsonl`` repeats both
+classes and adds a reference answer for the answerable ones.
 """
 
 import json

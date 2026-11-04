@@ -74,6 +74,20 @@ routing:
   # knob. python -m rag.routing --eval is how to judge it.
   sufficiency_threshold: 0.35
 
+evaluation:
+  # Answer correctness is factual_weight * F1 + (1 - factual_weight) * cosine.
+  # 0.75 is the RAGAS default for the factual part.
+  factual_weight: 0.75
+  # An answerable question is a win only when answer correctness reaches this.
+  win_correctness: 0.5
+  # Uncached prices for openai/gpt-oss-20b, USD per 1,000,000 tokens, from
+  # the Groq model page. Every prompt token is priced as input. Change these
+  # when llm.model changes. Cached input is cheaper and is not split out.
+  prompt_usd_per_million: 0.075
+  completion_usd_per_million: 0.30
+  # How many uncovered chunks one synthesize run proposes.
+  synthesize_limit: 5
+
 qdrant:
   url: http://localhost:6333
   collection: knowledge

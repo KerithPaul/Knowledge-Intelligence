@@ -1,4 +1,4 @@
-"""The routing starter set matches the retrieval questions, plus out-of-corpus ones."""
+"""The routing labels match the retrieval questions, plus out-of-corpus ones."""
 
 import pytest
 
@@ -13,6 +13,10 @@ _ABSENT = {
     "Which planet is the largest in Earth's solar system?": "solar system",
     "How many players are on the field for one soccer team during a standard match?": "soccer",
     "What year was the Eiffel Tower completed?": "eiffel",
+    "What role do mitochondria play in a living cell?": "mitochondria",
+    "How does photosynthesis store energy from sunlight?": "photosynthesis",
+    "Which plays did Shakespeare write besides the tragedies?": "shakespeare",
+    "What does the Pythagorean theorem say about the sides of a right triangle?": "pythagorean",
 }
 
 

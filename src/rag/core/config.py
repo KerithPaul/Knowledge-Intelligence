@@ -117,6 +117,27 @@ class RoutingSettings(BaseModel):
     sufficiency_threshold: float = Field(ge=0.0, le=1.0)
 
 
+class EvaluationSettings(BaseModel):
+    """Weights, the win bar, and the token prices for the Phase 6 harness.
+
+    ``factual_weight`` is the share of answer correctness that comes from
+    fact overlap. The rest is the cosine of the two passages.
+    ``win_correctness`` is how high that score must be before an answerable
+    question counts as a win.
+
+    Prices are USD per 1,000,000 tokens. The default is 0 so a missing
+    block does not invent a bill. ``settings.yaml`` sets the uncached
+    Groq rates for the configured model. Cached input is cheaper on that
+    price page, and the report does not split it out.
+    """
+
+    factual_weight: float = Field(default=0.75, ge=0.0, le=1.0)
+    win_correctness: float = Field(default=0.5, ge=0.0, le=1.0)
+    prompt_usd_per_million: float = Field(default=0.0, ge=0.0)
+    completion_usd_per_million: float = Field(default=0.0, ge=0.0)
+    synthesize_limit: int = Field(default=5, gt=0)
+
+
 class QdrantSettings(BaseModel):
     url: str
     collection: str
@@ -170,6 +191,7 @@ class Settings(BaseSettings):
     retrieval: RetrievalSettings
     generation: GenerationSettings = Field(default_factory=GenerationSettings)
     routing: RoutingSettings
+    evaluation: EvaluationSettings = Field(default_factory=EvaluationSettings)
     qdrant: QdrantSettings
 
     @classmethod

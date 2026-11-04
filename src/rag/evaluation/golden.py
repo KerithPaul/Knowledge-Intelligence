@@ -1,9 +1,9 @@
 """The hand-checked retrieval questions for Phase 3.
 
 Each row names the chunks that contain `evidence`. The query is the
-question a person would ask. Phase 6 replaces this starter set with a
-larger synthetic golden set. Reports written next to this file are
-generated and stay out of git.
+question a person would ask. The Phase 6 file ``qa_golden.jsonl`` repeats
+these rows and adds a reference answer. Reports written next to this file
+are generated and stay out of git.
 """
 
 import json

@@ -41,6 +41,8 @@ data/evaluation/**
 # Hand-checked retrieval and routing labels. Reports next to them stay ignored.
 !data/evaluation/retrieval_golden.jsonl
 !data/evaluation/routing_golden.jsonl
+!data/evaluation/qa_golden.jsonl
+!data/evaluation/baselines.json
 
 # Model and tool caches, if pointed at the repo
 .cache/

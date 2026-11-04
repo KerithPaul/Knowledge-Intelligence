@@ -23,7 +23,7 @@ knowledge-intelligence/
 │   │   ├── hermes/          ← 9 docs, YAML frontmatter (title/description/sidebar_position)
 │   │   └── openai_sdk/      ← 4 docs, PLAIN markdown, NO frontmatter  ⚠ parse both cases
 │   ├── processed/           ← chunks.jsonl, chunk_stats.json, index_stats.json (generated)
-│   └── evaluation/          ← retrieval_golden.jsonl and routing_golden.jsonl (hand-checked). --eval reports are generated.
+│   └── evaluation/          ← retrieval, routing, and qa golden JSONL, plus baselines.json. Reports are generated.
 ├── src/rag/                 ← application code (see §2)
 └── tests/                   ← pytest suite, mirrors src/rag/
 ```
@@ -41,7 +41,7 @@ knowledge-intelligence/
 | `retrieval/` | `pipeline.py`, `dense.py`, `bm25.py`, `fusion.py`, `rerank.py`, `filters.py` — dense search, BM25, RRF, rerank | P3 |
 | `generation/` | `groq.py`, `pipeline.py`, `context.py`, `prompt.py`, `parse.py`, `types.py` — Groq client, numbered context, citations, insufficient-context signal | P0 client; P4 grounding |
 | `routing/` | `pipeline.py`, `types.py` — best rerank score, then the grounded answer. No web search | P5 |
-| `evaluation/` | `retrieval.py`, `golden.py`, `generation.py` — retrieval metrics, the Phase 3 question file, faithfulness, and answer relevance. Context precision, context recall, and answer correctness remain P6 | P3 retrieval; P4 generation scores; P6 runners |
+| `evaluation/` | `retrieval.py`, `golden.py`, `routing.py`, `generation.py`, `quality.py`, `operational.py`, `harness.py`, `gate.py`, `synthesize.py`, `crosscheck.py` — metrics, the golden files, the harness, the regression gate, and the formula cross-check | P3 retrieval; P4 faithfulness; P5 routing; P6 harness |
 | `serving/` *(new)* | FastAPI app (`/ask` `/ingest` `/health`), schemas, tracing/logging | P7 |
 
 > When you create one of these, replace its row's phase note with the key entry-point
@@ -84,6 +84,14 @@ query
 - **Retrieval questions** live in `data/evaluation/retrieval_golden.jsonl`.
   Each row has an `evidence` string that must appear only in the labeled chunks.
   `python -m rag.retrieval --eval` writes `retrieval_report.json` beside it.
+  `qa_golden.jsonl` repeats those rows, adds a reference answer that contains
+  the evidence, and repeats the routing labels. `python -m rag.evaluation`
+  scores that file and writes `harness_report.json`. `--gate` compares the
+  report with `baselines.json`. Context precision divides by the useful-block
+  count. The RAGAS form adds `1e-10` to that count. Answer correctness embeds
+  the answer and the reference as passages, then mixes factual F1 at weight
+  0.75 with the cosine. An answerable win needs a retrieved labeled chunk, an
+  accepted answer, and correctness at or above `evaluation.win_correctness`.
 - **Grounded answers** cite numbered context blocks. `sufficient` is false when
   retrieval returns nothing, when the model says the context is not enough, or
   when a claimed answer cites no real block. Those three cases use one fixed

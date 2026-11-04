@@ -54,6 +54,15 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+def test_repository_yaml_sets_the_evaluation_prices() -> None:
+    settings = load_settings()
+    assert settings.evaluation.factual_weight == 0.75
+    assert settings.evaluation.win_correctness == 0.5
+    assert settings.evaluation.prompt_usd_per_million == 0.075
+    assert settings.evaluation.completion_usd_per_million == 0.30
+    assert settings.evaluation.synthesize_limit == 5
+
+
 def test_yaml_values_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_env(monkeypatch)
     yaml_file = _write(tmp_path, "settings.yaml", _YAML)

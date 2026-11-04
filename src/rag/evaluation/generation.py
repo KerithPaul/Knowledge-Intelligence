@@ -16,8 +16,8 @@ split assumes the embedder does not add a query instruction. BGE does.
 A judge that returns more questions than requested is cut to the requested
 count. Fewer questions are scored as they are, as long as there is one.
 
-Context precision, context recall, and answer correctness need a golden
-answer or labeled chunks. Those stay in Phase 6.
+Context precision, context recall, and answer correctness are in
+``quality.py``. They need the reference answer from the Phase 6 golden file.
 """
 
 import math

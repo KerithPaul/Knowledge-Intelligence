@@ -1,12 +1,13 @@
-"""Prompts for the grounded answer and for the two Phase 4 judges.
+"""Prompts for the grounded answer and for the evaluation judges.
 
 The answer prompt is the anti-hallucination rule: the model may use only the
 numbered blocks, every fact it states must cite one, and a missing fact is
 the insufficient-context sentence rather than a guess.
 
 The judge prompts serve the hand-built metrics. Claim extraction and the
-support verdict are the faithfulness steps. The question prompt is the
-answer-relevance step.
+support verdict are the faithfulness steps, and context recall reuses them
+on the reference answer. The question prompt is the answer-relevance step.
+Context precision and the fact sort are the Phase 6 judges.
 """
 
 import json
@@ -132,3 +133,92 @@ def questions_user(answer: str, count: int) -> str:
         "\n"
         "Reply with the JSON object only."
     )
+
+
+CONTEXT_PRECISION_SYSTEM = (
+    "You judge whether each context block helps a reader reach the reference "
+    "answer.\n"
+    "\n"
+    "A block is useful when it states a fact the reference uses, or when a "
+    "careful reader needs that block to arrive at the reference. A block about "
+    "a different topic is not useful. Outside knowledge does not count. If you "
+    "are unsure, useful is false.\n"
+    "\n"
+    "Reply with one JSON object and no other text, with one verdict per block "
+    "in the same order:\n"
+    '{"verdicts": [{"number": 1, "useful": true}]}\n'
+    "\n"
+    "useful must be true or false. number is the block number.\n"
+)
+
+CLASSIFY_SYSTEM = (
+    "You compare an answer with a reference answer.\n"
+    "\n"
+    "Split both into atomic facts. Then sort those facts into three lists:\n"
+    "- true_positives: facts present in both\n"
+    "- false_positives: facts in the answer that the reference does not state\n"
+    "- false_negatives: facts in the reference that the answer does not state\n"
+    "\n"
+    "A paraphrase of the same fact is a true positive. A different number, "
+    "name, or condition is not the same fact. Do not add a fact that neither "
+    "text states. Do not list one fact in more than one list.\n"
+    "\n"
+    "Reply with one JSON object and no other text:\n"
+    '{"true_positives": [], "false_positives": [], "false_negatives": []}\n'
+)
+
+SYNTHESIZE_SYSTEM = (
+    "You write one evaluation question from a single documentation chunk.\n"
+    "\n"
+    "The question is one a person would ask after reading that chunk. The "
+    "reference answer uses only facts stated in the chunk. The evidence is a "
+    "short span copied exactly from the chunk, including its punctuation, and "
+    "that same span appears in the reference answer. Do not use any fact that "
+    "is not in the chunk.\n"
+    "\n"
+    "Reply with one JSON object and no other text:\n"
+    '{"question": "the question", "reference_answer": "the answer", '
+    '"evidence": "exact span from the chunk"}\n'
+)
+
+UNANSWERABLE_SYSTEM = (
+    "You write one question this documentation corpus cannot answer.\n"
+    "\n"
+    "The corpus is Hermes agent internals and the OpenAI Python SDK. The "
+    "question must be about a different subject. Pick a marker: a short phrase "
+    "that appears in the question and that would not appear in that corpus.\n"
+    "\n"
+    "Reply with one JSON object and no other text:\n"
+    '{"question": "the question", "marker": "short phrase"}\n'
+)
+
+
+def context_precision_user(query: str, reference: str, context: str) -> str:
+    shown = context if context.strip() else "(no context blocks)"
+    return (
+        f"Question:\n{query.strip()}\n"
+        "\n"
+        f"Reference answer:\n{reference.strip()}\n"
+        "\n"
+        f"Context:\n{shown}\n"
+        "\n"
+        "Reply with the JSON object only."
+    )
+
+
+def classify_user(answer: str, reference: str) -> str:
+    return (
+        f"Answer:\n{answer.strip()}\n"
+        "\n"
+        f"Reference answer:\n{reference.strip()}\n"
+        "\n"
+        "Reply with the JSON object only."
+    )
+
+
+def synthesize_user(chunk_text: str) -> str:
+    return f"Documentation chunk:\n{chunk_text.strip()}\n\nReply with the JSON object only."
+
+
+def unanswerable_user() -> str:
+    return "Reply with the JSON object only."

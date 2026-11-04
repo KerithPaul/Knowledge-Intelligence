@@ -16,7 +16,7 @@ is deferred until a later agent tool.
 The authoritative spec is **`IMPLEMENTATION_PLAN.md`** — stack, query flow, module
 layout, phased plan, and evaluation methods. Read it before any non-trivial change.
 
-**Current state:** Phase 0, Phase 1, and Phase 2 are done. Python 3.12 venv, config,
+**Current state:** Phases 0 through 6 are done. Python 3.12 venv, config,
 `LLMClient` (Groq), `EmbeddingClient` (local BGE), and a Qdrant Compose file are
 in place. Groq and BGE smoke tests passed. Phase 1 parses `data/raw` and writes
 `data/processed/chunks.jsonl` plus `chunk_stats.json` through `ingest_corpus`
@@ -38,9 +38,13 @@ the Phase 4 generator only when the score passes. A lower score, a model
 refusal, or an uncited answer all return the insufficient-context sentence.
 There is no web search. `python -m rag.routing --eval` scores
 `data/evaluation/routing_golden.jsonl` for decision accuracy, false-fallback,
-and missed-fallback. The answerable rows are the Phase 3 retrieval questions.
-Four hand-checked questions sit outside this corpus. Phase 6 grows the set.
-The API is still empty.
+and missed-fallback. The answerable rows are the retrieval questions.
+Eight hand-checked questions sit outside this corpus. Phase 6 is the harness.
+`python -m rag.evaluation` scores `qa_golden.jsonl` for retrieval, routing,
+context precision, context recall, answer correctness, faithfulness, answer
+relevance, latency, token cost, and win rate. `--gate` compares that report
+with `baselines.json`. `--synthesize` proposes more rows and does not edit
+the golden files. The API is still empty.
 
 ---
 
@@ -98,6 +102,11 @@ The API is still empty.
 # score that answer        .\.venv\Scripts\python.exe -m rag.generation --score "your question"
 # ask through the gate     .\.venv\Scripts\python.exe -m rag.routing "your question"
 # score the routing set    .\.venv\Scripts\python.exe -m rag.routing --eval
+# full evaluation harness  .\.venv\Scripts\python.exe -m rag.evaluation
+# run, then gate baselines .\.venv\Scripts\python.exe -m rag.evaluation --gate
+# gate the saved report    .\.venv\Scripts\python.exe -m rag.evaluation --check
+# propose more golden rows .\.venv\Scripts\python.exe -m rag.evaluation --synthesize
+# formula cross-check      .\.venv\Scripts\python.exe -m rag.evaluation --cross-check
 # run API (Phase 7)        not built yet
 ```
 > Keep this block in sync with reality. An agent that can't find the real command
@@ -115,9 +124,10 @@ See **`MAP.md`** for the full index. The short version:
 - `data/raw/` — the corpus. `hermes/` (9 docs, YAML frontmatter) + `openai_sdk/`
   (4 docs, **plain markdown, no frontmatter** — handle both cases in parsing).
 - `data/processed/` — parsed/chunked artifacts (generated; don't hand-edit).
-- `data/evaluation/` — `retrieval_golden.jsonl` is the hand-checked Phase 3 set.
-  `routing_golden.jsonl` is the hand-checked Phase 5 set. Reports from `--eval`
-  are generated and gitignored. Phase 6 grows both sets.
+- `data/evaluation/` — `retrieval_golden.jsonl`, `routing_golden.jsonl`, and
+  `qa_golden.jsonl` are the hand-checked labels. `qa_golden.jsonl` adds the
+  reference answer. `baselines.json` holds the regression floors. Reports
+  from `--eval` and the harness are generated and gitignored.
 - `tests/` — pytest suite, mirrors `src/rag/` layout.
 
 ---
@@ -165,7 +175,13 @@ See **`MAP.md`** for the full index. The short version:
       insufficient-context sentence. `python -m rag.routing --eval` reports
       decision accuracy, false-fallback, and missed-fallback on
       `data/evaluation/routing_golden.jsonl`.
-- [ ] **P6 Evaluation** — golden set, from-scratch metrics, cross-check vs RAGAS/DeepEval.
+- [x] **P6 Evaluation** — `qa_golden.jsonl` grows the retrieval and routing
+      questions, including more the corpus cannot answer. Context precision,
+      context recall, and answer correctness are hand-built. The harness also
+      reports latency, token cost, and win rate. `--cross-check` explains the
+      RAGAS and DeepEval formula gaps. Those packages are not installed.
+      *Exit:* `python -m rag.evaluation` writes `harness_report.json`.
+      `--gate` fails when that report misses `baselines.json`.
 - [ ] **P7 Serving** — FastAPI `/ask` `/ingest` `/health`, tracing, Dockerfile+Compose.
 - [ ] **P8 Advanced (optional)** — HyDE/multi-query, semantic cache, guardrails, Langfuse.
 

@@ -9,3 +9,8 @@
 {"query": "How do I make the Bedrock client sign requests with SigV4 instead of an environment bearer token?", "relevant_chunk_ids": ["openai_sdk/bedrock.md#0001"], "evidence": "SigV4 authentication"}
 {"query": "Why does the tool runner refuse image generation when response storage is disabled?", "relevant_chunk_ids": ["openai_sdk/browser.md#0014"], "evidence": "store=False"}
 {"query": "How does a memory plugin register its provider during discovery?", "relevant_chunk_ids": ["hermes/memory-provider-plugin.md#0003"], "evidence": "register_memory_provider"}
+{"query": "Which environment variable override accepts a provider id in the Hermes inference resolver?", "relevant_chunk_ids": ["hermes/adding-providers.md#0002"], "evidence": "HERMES_INFERENCE_PROVIDER"}
+{"query": "Where is a new built-in tool listed so batch processing includes it?", "relevant_chunk_ids": ["hermes/adding-tools.md#0003"], "evidence": "toolset_distributions.py"}
+{"query": "What is the duckduckgo-search skill an example of in the skill format?", "relevant_chunk_ids": ["hermes/creating-skills.md#0002"], "evidence": "duckduckgo-search"}
+{"query": "Which file remains the authority for coordinated disclosure in the OpenAI SDK security model?", "relevant_chunk_ids": ["openai_sdk/security-model.md#0000"], "evidence": "SECURITY.md"}
+{"query": "Which filter type does openai.types export next to ChatModel?", "relevant_chunk_ids": ["openai_sdk/api.md#0000"], "evidence": "ComparisonFilter"}

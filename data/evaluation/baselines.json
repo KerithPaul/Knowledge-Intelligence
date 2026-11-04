@@ -1,0 +1,12 @@
+{
+  "note": "retrieval.hit_at_k and retrieval.recall_at_k were 1.0 on all 16 retrieval questions. Routing accuracy was 1.0 with no false or missed fallback on the earlier 15-question set. The routing file now has 24 questions and has not been re-scored. Generation floors stay unset until python -m rag.evaluation records them.",
+  "min": {
+    "retrieval.hit_at_k": 1.0,
+    "retrieval.recall_at_k": 1.0,
+    "routing.accuracy": 1.0
+  },
+  "max": {
+    "routing.false_fallback_rate": 0.0,
+    "routing.missed_fallback_rate": 0.0
+  }
+}

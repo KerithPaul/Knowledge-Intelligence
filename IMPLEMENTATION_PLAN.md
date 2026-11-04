@@ -5,8 +5,10 @@
 > When the sufficiency gate says those docs are not enough, it says so.
 > Web search is deferred until a later agent tool.
 
-**Status:** Phase 0 through the Phase 5 sufficiency gate are in the tree.
-Web search is deferred. Phases 6–8 are not started.
+**Status:** Phase 0 through the Phase 6 evaluation harness are in the tree.
+Web search is deferred. Phases 7–8 are not started. The harness command is
+`python -m rag.evaluation`. A live RAGAS or DeepEval run is optional and
+stays out of the default install.
 **Created:** 2026-10-26
 **Primary goal:** Understand *every method* at each RAG stage — with special
 emphasis on **evaluation** and **production-grade implementation**. Core
