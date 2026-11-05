@@ -30,7 +30,31 @@ def _response(content: str = "pong", prompt_tokens: int = 4, completion_tokens: 
     return SimpleNamespace(choices=[choice], usage=usage, model="openai/gpt-oss-20b")
 
 
-def _client(completions: _Completions, **overrides) -> GroqLLMClient:
+class _StreamCompletions:
+    def __init__(self, chunks: list[object], error: Exception | None = None) -> None:
+        self.chunks = chunks
+        self.error = error
+        self.kwargs = None
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        if self.error is not None:
+            raise self.error
+        return iter(self.chunks)
+
+
+def _stream_chunk(text: str, finish_reason: str | None = None):
+    delta = SimpleNamespace(content=text)
+    choice = SimpleNamespace(delta=delta, finish_reason=finish_reason)
+    return SimpleNamespace(choices=[choice], usage=None, model="openai/gpt-oss-20b")
+
+
+def _usage_chunk(prompt_tokens: int, completion_tokens: int):
+    usage = SimpleNamespace(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
+    return SimpleNamespace(choices=[], usage=usage, model="openai/gpt-oss-20b")
+
+
+def _client(completions: _Completions | _StreamCompletions, **overrides) -> GroqLLMClient:
     settings = dict(
         api_key="gsk_unit_test_key",
         model="openai/gpt-oss-20b",
@@ -126,6 +150,49 @@ def test_missing_key_and_empty_messages() -> None:
     client = _client(_Completions(_response()))
     with pytest.raises(ValueError, match="empty"):
         client.complete([])
+
+
+def test_stream_joins_deltas_and_records_usage() -> None:
+    secret = "gsk_unit_test_key"
+    chunks = [
+        _stream_chunk("Hel"),
+        _stream_chunk("lo", finish_reason="stop"),
+        _usage_chunk(prompt_tokens=0, completion_tokens=2),
+    ]
+    completions = _StreamCompletions(chunks)
+    client = _client(completions)
+    trace = RequestTrace()
+    events = list(
+        client.stream([LLMMessage(role="user", content="ping")], max_tokens=16, trace=trace)
+    )
+    assert "".join(event.text for event in events) == "Hello"
+    assert events[-1].done is True
+    assert events[-1].prompt_tokens == 0
+    assert events[-1].completion_tokens == 2
+    assert events[-1].finish_reason == "stop"
+    assert completions.kwargs["stream"] is True
+    assert completions.kwargs["stream_options"] == {"include_usage": True}
+    assert completions.kwargs["max_completion_tokens"] == 16
+    assert trace.spans[0].name == "llm.stream"
+    assert trace.spans[0].attributes["prompt_tokens"] == 0
+    assert "Hello" not in str(trace.spans[0].attributes)
+    assert secret not in repr(client)
+
+
+def test_stream_error_is_redacted_and_empty_text_is_an_error() -> None:
+    secret = "gsk_unit_test_key"
+    completions = _StreamCompletions([], error=RuntimeError(f"Bearer {secret}"))
+    client = _client(completions)
+    with pytest.raises(LLMError, match="Bearer \\[REDACTED\\]") as caught:
+        list(client.stream([LLMMessage(role="user", content="ping")]))
+    assert secret not in str(caught.value)
+    assert caught.value.__cause__ is None
+
+    trace = RequestTrace()
+    blank = _client(_StreamCompletions([_stream_chunk("  ")]))
+    with pytest.raises(LLMError, match="empty"):
+        list(blank.stream([LLMMessage(role="user", content="ping")], trace=trace))
+    assert trace.spans == []
 
 
 def test_factory_rejects_unknown_provider(tmp_path, monkeypatch) -> None:

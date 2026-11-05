@@ -117,6 +117,20 @@ class RoutingSettings(BaseModel):
     sufficiency_threshold: float = Field(ge=0.0, le=1.0)
 
 
+class ServingSettings(BaseModel):
+    """How the API process listens.
+
+    `profile` is `local` when Python runs on the host and Qdrant is on
+    localhost. `docker` is the Compose app service: that process sets
+    `QDRANT__URL` to the Qdrant service name and binds `0.0.0.0`.
+    """
+
+    host: str = "127.0.0.1"
+    port: int = Field(default=8000, gt=0, le=65535)
+    log_level: Literal["debug", "info", "warning", "error"] = "info"
+    profile: Literal["local", "docker"] = "local"
+
+
 class EvaluationSettings(BaseModel):
     """Weights, the win bar, and the token prices for the Phase 6 harness.
 
@@ -192,6 +206,7 @@ class Settings(BaseSettings):
     generation: GenerationSettings = Field(default_factory=GenerationSettings)
     routing: RoutingSettings
     evaluation: EvaluationSettings = Field(default_factory=EvaluationSettings)
+    serving: ServingSettings = Field(default_factory=ServingSettings)
     qdrant: QdrantSettings
 
     @classmethod

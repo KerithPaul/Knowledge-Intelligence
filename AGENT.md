@@ -16,7 +16,7 @@ is deferred until a later agent tool.
 The authoritative spec is **`IMPLEMENTATION_PLAN.md`** — stack, query flow, module
 layout, phased plan, and evaluation methods. Read it before any non-trivial change.
 
-**Current state:** Phases 0 through 6 are done. Python 3.12 venv, config,
+**Current state:** Phases 0 through 7 are done. Python 3.12 venv, config,
 `LLMClient` (Groq), `EmbeddingClient` (local BGE), and a Qdrant Compose file are
 in place. Groq and BGE smoke tests passed. Phase 1 parses `data/raw` and writes
 `data/processed/chunks.jsonl` plus `chunk_stats.json` through `ingest_corpus`
@@ -44,7 +44,12 @@ Eight hand-checked questions sit outside this corpus. Phase 6 is the harness.
 context precision, context recall, answer correctness, faithfulness, answer
 relevance, latency, token cost, and win rate. `--gate` compares that report
 with `baselines.json`. `--synthesize` proposes more rows and does not edit
-the golden files. The API is still empty.
+the golden files. Phase 7 serves that ask path. `python -m rag.serving`
+exposes `/health`, `/ask`, and `/ingest`. `/ask` with `"stream": true` is
+server-sent events. Those text events are the grounded answer. Raw model
+tokens stay in the process until the citation rules accept or replace them.
+`/ingest` rewrites `data/processed` and reindexes Qdrant. Compose profile
+`docker` runs the API beside Qdrant.
 
 ---
 
@@ -107,7 +112,8 @@ the golden files. The API is still empty.
 # gate the saved report    .\.venv\Scripts\python.exe -m rag.evaluation --check
 # propose more golden rows .\.venv\Scripts\python.exe -m rag.evaluation --synthesize
 # formula cross-check      .\.venv\Scripts\python.exe -m rag.evaluation --cross-check
-# run API (Phase 7)        not built yet
+# serve the API            .\.venv\Scripts\python.exe -m rag.serving
+# API plus Qdrant          docker compose --profile docker up -d --build
 ```
 > Keep this block in sync with reality. An agent that can't find the real command
 > will guess — that's the failure mode this file exists to prevent.
@@ -182,7 +188,13 @@ See **`MAP.md`** for the full index. The short version:
       RAGAS and DeepEval formula gaps. Those packages are not installed.
       *Exit:* `python -m rag.evaluation` writes `harness_report.json`.
       `--gate` fails when that report misses `baselines.json`.
-- [ ] **P7 Serving** — FastAPI `/ask` `/ingest` `/health`, tracing, Dockerfile+Compose.
+- [x] **P7 Serving** — FastAPI `/ask` `/ingest` `/health`, per-request JSON
+      logs, and a trace on each ask. `/ask` can stream. The streamed text is
+      the grounded answer. Dockerfile and Compose profile `docker` run the
+      app beside Qdrant. `configs/profiles/docker.env` points the app at the
+      Qdrant service. *Exit:* `python -m rag.serving` serves those routes.
+      A streamed ask that the citation rules reject does not send the raw
+      model text.
 - [ ] **P8 Advanced (optional)** — HyDE/multi-query, semantic cache, guardrails, Langfuse.
 
 Tick these as phases complete; they are the contract for "progress."

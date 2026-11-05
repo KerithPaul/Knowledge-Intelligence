@@ -56,6 +56,10 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_repository_yaml_sets_the_evaluation_prices() -> None:
     settings = load_settings()
+    assert settings.serving.profile == "local"
+    assert settings.serving.host == "127.0.0.1"
+    assert settings.serving.port == 8000
+    assert settings.serving.log_level == "info"
     assert settings.evaluation.factual_weight == 0.75
     assert settings.evaluation.win_correctness == 0.5
     assert settings.evaluation.prompt_usd_per_million == 0.075
@@ -95,6 +99,21 @@ def test_dotenv_and_env_override_yaml(tmp_path: Path, monkeypatch: pytest.Monkey
     assert settings.tavily_api_key.get_secret_value() == "tavily-dotenv"
     assert "dotenv-key-value" not in repr(settings)
     assert "tavily-dotenv" not in repr(settings)
+
+
+def test_serving_profile_can_come_from_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_env(monkeypatch)
+    monkeypatch.delenv("SERVING__PROFILE", raising=False)
+    monkeypatch.delenv("SERVING__HOST", raising=False)
+    yaml_file = _write(tmp_path, "settings.yaml", _YAML)
+    env_file = _write(tmp_path, ".env", "")
+    monkeypatch.setenv("SERVING__PROFILE", "docker")
+    monkeypatch.setenv("SERVING__HOST", "0.0.0.0")
+    settings = load_settings(yaml_file=yaml_file, env_file=env_file)
+    assert settings.serving.profile == "docker"
+    assert settings.serving.host == "0.0.0.0"
 
 
 def test_keyword_override_beats_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

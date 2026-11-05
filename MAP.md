@@ -13,11 +13,14 @@ knowledge-intelligence/
 ├── SOUL.md                  ← philosophy / non-negotiable principles
 ├── MAP.md                   ← this file
 ├── pyproject.toml           ← package + ruff + pytest
-├── docker-compose.yml       ← Qdrant only (app service arrives in Phase 7)
+├── docker-compose.yml       ← Qdrant, plus the API under Compose profile `docker`
+├── Dockerfile               ← API image (CPU torch, editable install)
+├── .dockerignore
 ├── .env.example             ← secret names, no values
 ├── .pre-commit-config.yaml
 ├── configs/
-│   └── settings.yaml        ← tunables (models, chunk size, top_k, thresholds). No secrets.
+│   ├── settings.yaml        ← tunables (models, chunk size, top_k, thresholds). No secrets.
+│   └── profiles/docker.env  ← Compose overrides: Qdrant hostname, bind, profile. No secrets.
 ├── data/
 │   ├── raw/                 ← the corpus (source of truth for answers)
 │   │   ├── hermes/          ← 9 docs, YAML frontmatter (title/description/sidebar_position)
@@ -32,7 +35,7 @@ knowledge-intelligence/
 
 | Subpackage | Responsibility | Phase |
 |---|---|---|
-| `core/` | `config.py` (YAML + `.env`), `interfaces.py`, `clients.py` (the provider switch), `trace.py`, `errors.py` | P0 |
+| `core/` | `config.py` (YAML + `.env`), `interfaces.py`, `clients.py` (the provider switch), `trace.py`, `errors.py`, `redact.py` | P0 |
 | `ingestion.py` | `ingest_corpus` reads `data/raw`, chunks, and can write `data/processed` | P1 |
 | `parsing/` | `parsing/markdown.py` — frontmatter, heading paths, fenced blocks | P1 |
 | `chunking/` | `chunking/chunker.py`, `tokens.py`, `stats.py` — pack blocks and measure splits | P1 |
@@ -40,9 +43,9 @@ knowledge-intelligence/
 | `indexing/` | `indexer.py`, `store.py`, `sparse.py`, `records.py` — batch-embed and upsert Qdrant | P2 |
 | `retrieval/` | `pipeline.py`, `dense.py`, `bm25.py`, `fusion.py`, `rerank.py`, `filters.py` — dense search, BM25, RRF, rerank | P3 |
 | `generation/` | `groq.py`, `pipeline.py`, `context.py`, `prompt.py`, `parse.py`, `types.py` — Groq client, numbered context, citations, insufficient-context signal | P0 client; P4 grounding |
-| `routing/` | `pipeline.py`, `types.py` — best rerank score, then the grounded answer. No web search | P5 |
+| `routing/` | `pipeline.py`, `types.py`, `events.py` — best rerank score, then the grounded answer. Stream events are that answer. No web search | P5 |
 | `evaluation/` | `retrieval.py`, `golden.py`, `routing.py`, `generation.py`, `quality.py`, `operational.py`, `harness.py`, `gate.py`, `synthesize.py`, `crosscheck.py` — metrics, the golden files, the harness, the regression gate, and the formula cross-check | P3 retrieval; P4 faithfulness; P5 routing; P6 harness |
-| `serving/` *(new)* | FastAPI app (`/ask` `/ingest` `/health`), schemas, tracing/logging | P7 |
+| `serving/` | `app.py`, `runtime.py`, `schemas.py`, `health.py`, `ingest.py`, `logging.py` — `/ask` `/ingest` `/health`. Streamed text is the grounded answer | P7 |
 
 > When you create one of these, replace its row's phase note with the key entry-point
 > file(s), e.g. `core/config.py`, so the next agent lands directly on the code.
@@ -60,6 +63,8 @@ query
               └─ score passes → grounded answer + citations (Groq)
                     └─ model says not enough, or cites nothing → same sentence
   → trace (chunks, scores, routing decision, tokens, latency) → logged
+  → HTTP: `python -m rag.serving` returns that result from `/ask`
+        `stream: true` sends status, grounded-text deltas, answer, trace, done
 ```
 
 ## 4. Key facts an agent needs (and often gets wrong)
@@ -98,6 +103,15 @@ query
   sentence and do not keep the model's extra text. `--score` reports
   faithfulness and answer relevance. Both questions in answer relevance are
   embedded with the query prefix.
+- **The HTTP API** is `python -m rag.serving`. `POST /ask` is the same gate
+  as `python -m rag.routing`. `stream: true` is server-sent events. Deltas
+  are the grounded answer after the citation rules run, so an uncited model
+  draft is not sent. `POST /ingest` chunks `data/raw` and reindexes Qdrant.
+  `GET /health` probes Qdrant and does not load the embedding model. One
+  JSON log line is written per ask or ingest. It has no answer text and no
+  API key. The process lock keeps ingest from running beside a search.
+  Compose profile `docker` starts the API container. `docker compose up -d
+  qdrant` still starts only the database.
 - **The ask path** is `python -m rag.routing`. It calls the model only when
   the best rerank probability is at least `routing.sufficiency_threshold`
   (settings.yaml: 0.35). Otherwise it returns the same insufficient-context

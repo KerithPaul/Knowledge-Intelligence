@@ -1,7 +1,7 @@
 """Client seams. Provider code stays behind these types."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -23,8 +23,25 @@ class LLMResponse:
     latency_ms: float
 
 
+@dataclass(frozen=True)
+class LLMStreamEvent:
+    """One piece of a streamed completion.
+
+    `text` is only the new characters. The last event has `done` true.
+    Token counts are set on that last event when the provider sent them.
+    Events do not carry the API key.
+    """
+
+    text: str
+    done: bool
+    model: str
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    finish_reason: str | None = None
+
+
 class LLMClient(ABC):
-    """One chat completion. Streaming arrives with the API in Phase 7."""
+    """One chat completion. `stream` yields the same reply in pieces."""
 
     @abstractmethod
     def complete(
@@ -36,6 +53,35 @@ class LLMClient(ABC):
         trace: RequestTrace | None = None,
     ) -> LLMResponse:
         """Return the assistant text and the token and timing counts."""
+
+    def stream(
+        self,
+        messages: Sequence[LLMMessage],
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        trace: RequestTrace | None = None,
+    ) -> Iterator[LLMStreamEvent]:
+        """Yield text deltas. The default performs one `complete` call.
+
+        Groq overrides this and streams from the provider. A caller that
+        only implements `complete` still works. The last event has `done` true.
+        """
+
+        response = self.complete(
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            trace=trace,
+        )
+        yield LLMStreamEvent(
+            text=response.content,
+            done=True,
+            model=response.model,
+            prompt_tokens=response.prompt_tokens,
+            completion_tokens=response.completion_tokens,
+            finish_reason=None,
+        )
 
 
 class EmbeddingClient(ABC):

@@ -13,15 +13,18 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "numpy>=1.26",
     "openai>=1.50",
+    "fastapi>=0.115",
     "pydantic>=2.10",
     "pydantic-settings[yaml]>=2.6",
     # Same release as the Qdrant image in docker-compose.yml (v1.20.0).
     "qdrant-client>=1.20,<1.21",
     "sentence-transformers>=3.3",
+    "uvicorn>=0.32",
 ]
 
 [project.optional-dependencies]
 dev = [
+    "httpx>=0.27",
     "pre-commit>=4.0",
     "pytest>=8.3",
     "ruff>=0.8",

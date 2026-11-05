@@ -19,7 +19,7 @@ once a route is chosen. Spans do not store the answer text.
 
 import math
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Protocol
 
 from rag.core.config import Settings
@@ -29,6 +29,7 @@ from rag.generation.types import ContextSource, GroundedAnswer
 from rag.retrieval.filters import MetadataFilter
 from rag.retrieval.pipeline import Retriever, open_retriever
 from rag.retrieval.types import RetrievedChunk
+from rag.routing.events import AskDelta, AskResult, AskStatus, iter_text_deltas
 from rag.routing.types import DecidedBy, RoutedAnswer, RoutingReason
 
 
@@ -79,11 +80,68 @@ class Router:
     ) -> RoutedAnswer:
         """Retrieve, apply the score gate, and generate only when the score passes."""
 
-        cleaned = query.strip()
-        if not cleaned:
-            raise ValueError("query text is empty")
-        chunks = self._retriever.retrieve(
+        cleaned = _clean_query(query)
+        chosen, best, passed = self._retrieve(
             cleaned,
+            metadata_filter=metadata_filter,
+            top_n=top_n,
+            top_k=top_k,
+            trace=trace,
+        )
+        routed = self._route(cleaned, chosen, best, passed, trace=trace, stream=False)
+        _record_decision(trace, routed)
+        return routed
+
+    def ask_stream(
+        self,
+        query: str,
+        *,
+        metadata_filter: MetadataFilter | None = None,
+        top_n: int | None = None,
+        top_k: int | None = None,
+        trace: RequestTrace | None = None,
+    ) -> Iterator[AskStatus | AskDelta | AskResult]:
+        """Same gate as `ask`. Text events are the grounded answer.
+
+        A score refusal does not call the model. A passing score streams from
+        the provider when the generator supports it, then emits the accepted
+        text. The raw provider tokens are not events.
+        """
+
+        cleaned = _clean_query(query)
+        yield AskStatus(stage="retrieving")
+        chosen, best, passed = self._retrieve(
+            cleaned,
+            metadata_filter=metadata_filter,
+            top_n=top_n,
+            top_k=top_k,
+            trace=trace,
+        )
+        yield AskStatus(
+            stage="gate",
+            best_rerank_score=best,
+            threshold=self._threshold,
+            chunk_count=len(chosen),
+            passed=passed,
+        )
+        if passed:
+            yield AskStatus(stage="generating")
+        routed = self._route(cleaned, chosen, best, passed, trace=trace, stream=True)
+        _record_decision(trace, routed)
+        yield from iter_text_deltas(routed.text)
+        yield AskResult(routed=routed)
+
+    def _retrieve(
+        self,
+        query: str,
+        *,
+        metadata_filter: MetadataFilter | None,
+        top_n: int | None,
+        top_k: int | None,
+        trace: RequestTrace | None,
+    ) -> tuple[tuple[RetrievedChunk, ...], float | None, bool]:
+        chunks = self._retriever.retrieve(
+            query,
             metadata_filter=metadata_filter,
             top_n=top_n,
             top_k=top_k,
@@ -93,32 +151,40 @@ class Router:
         started = time.perf_counter()
         best = _best_score(chosen)
         passed = best is not None and best >= self._threshold
-        check_ms = (time.perf_counter() - started) * 1000
         _record_score(
             trace,
-            latency_ms=check_ms,
+            latency_ms=(time.perf_counter() - started) * 1000,
             threshold=self._threshold,
             chunk_count=len(chosen),
             best=best,
             passed=passed,
         )
+        return chosen, best, passed
+
+    def _route(
+        self,
+        query: str,
+        chosen: tuple[RetrievedChunk, ...],
+        best: float | None,
+        passed: bool,
+        *,
+        trace: RequestTrace | None,
+        stream: bool,
+    ) -> RoutedAnswer:
         if not passed:
             reason: RoutingReason = "empty_context" if best is None else "below_threshold"
-            routed = _refused(
-                cleaned,
+            return _refused(
+                query,
                 decided_by="retrieval_score",
                 reason=reason,
                 best=best,
                 threshold=self._threshold,
                 chunks=chosen,
             )
-            _record_decision(trace, routed)
-            return routed
-
-        answer = self._generator.generate(cleaned, chosen, trace=trace)
+        answer = _generate(self._generator, query, chosen, trace=trace, stream=stream)
         if answer.sufficient:
-            routed = RoutedAnswer(
-                query=cleaned,
+            return RoutedAnswer(
+                query=query,
                 route="knowledge_base",
                 decided_by="groundedness",
                 reason=None,
@@ -127,20 +193,17 @@ class Router:
                 chunks=chosen,
                 answer=answer,
             )
-        else:
-            if answer.insufficient_reason is None:
-                raise ValueError("an insufficient answer needs a reason")
-            routed = _refused(
-                cleaned,
-                decided_by="groundedness",
-                reason=answer.insufficient_reason,
-                best=best,
-                threshold=self._threshold,
-                chunks=chosen,
-                answer=answer,
-            )
-        _record_decision(trace, routed)
-        return routed
+        if answer.insufficient_reason is None:
+            raise ValueError("an insufficient answer needs a reason")
+        return _refused(
+            query,
+            decided_by="groundedness",
+            reason=answer.insufficient_reason,
+            best=best,
+            threshold=self._threshold,
+            chunks=chosen,
+            answer=answer,
+        )
 
 
 def open_router(
@@ -163,6 +226,34 @@ def open_router(
         writer,
         sufficiency_threshold=settings.routing.sufficiency_threshold,
     )
+
+
+def _clean_query(query: str) -> str:
+    cleaned = query.strip()
+    if not cleaned:
+        raise ValueError("query text is empty")
+    return cleaned
+
+
+def _generate(
+    generator: _Answerer,
+    query: str,
+    chunks: tuple[RetrievedChunk, ...],
+    *,
+    trace: RequestTrace | None,
+    stream: bool,
+) -> GroundedAnswer:
+    """Call the streaming generator when this ask is a stream and it has one.
+
+    A test double that only implements `generate` still works. The non-stream
+    ask path always uses `generate`, so a one-shot completion stays one shot.
+    """
+
+    if stream:
+        generate_stream = getattr(generator, "generate_stream", None)
+        if generate_stream is not None:
+            return generate_stream(query, chunks, trace=trace)
+    return generator.generate(query, chunks, trace=trace)
 
 
 def _require_threshold(value: object) -> float:

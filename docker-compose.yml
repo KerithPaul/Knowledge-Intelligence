@@ -1,5 +1,9 @@
-# Qdrant server. The Python client in pyproject.toml is pinned to this release.
-# The app service and Dockerfile arrive in Phase 7.
+# Qdrant, and the API behind the Compose profile `docker`.
+# The Python client in pyproject.toml is pinned to the Qdrant image below.
+#
+# `docker compose up -d qdrant` starts the database only, for a host venv.
+# `docker compose --profile docker up -d --build` also builds and runs the API.
+# The API profile is configs/profiles/docker.env (Qdrant hostname `qdrant`).
 #
 # On Windows, Qdrant needs a named volume. A bind mount of a Windows folder
 # is not a POSIX filesystem, and Qdrant refuses to start on it.
@@ -23,5 +27,37 @@ services:
       retries: 5
       start_period: 10s
 
+  app:
+    build: .
+    profiles: ["docker"]
+    container_name: knowledge-api
+    restart: unless-stopped
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+      - configs/profiles/docker.env
+    environment:
+      HF_HOME: /cache
+    volumes:
+      - ./data:/app/data
+      - hf_cache:/cache
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
 volumes:
   qdrant_storage:
+  hf_cache:

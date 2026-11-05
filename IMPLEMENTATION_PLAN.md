@@ -5,10 +5,10 @@
 > When the sufficiency gate says those docs are not enough, it says so.
 > Web search is deferred until a later agent tool.
 
-**Status:** Phase 0 through the Phase 6 evaluation harness are in the tree.
-Web search is deferred. Phases 7–8 are not started. The harness command is
-`python -m rag.evaluation`. A live RAGAS or DeepEval run is optional and
-stays out of the default install.
+**Status:** Phase 0 through the Phase 7 API are in the tree.
+Web search is deferred. Phase 8 is not started. The harness command is
+`python -m rag.evaluation`. The API command is `python -m rag.serving`.
+A live RAGAS or DeepEval run is optional and stays out of the default install.
 **Created:** 2026-10-26
 **Primary goal:** Understand *every method* at each RAG stage — with special
 emphasis on **evaluation** and **production-grade implementation**. Core
@@ -66,7 +66,7 @@ src/rag/
   generation/  LLMClient (Groq), prompt assembly, citations, grounding
   routing/     sufficiency gate (score, then groundedness)       P5
   evaluation/  datasets, retrieval metrics, gen metrics, runners, reports
-  serving/     FastAPI app, schemas, tracing/logging             (new)
+  serving/     FastAPI app, schemas, tracing/logging             P7
   core/        config (pydantic-settings), trace model, interfaces (new)
 configs/       *.yaml — chunk sizes, model names, top_k, thresholds
 data/raw|processed|evaluation
@@ -140,6 +140,12 @@ Evaluation is a first-class concern at **every** phase, not only Phase 6.
 - FastAPI: `/ask` (streaming), `/ingest`, `/health`.
 - Per-request tracing/structured logs, error handling.
 - Dockerfile + Compose (app + Qdrant); config profiles.
+- **Exit:** `python -m rag.serving` serves those three routes. `/ask` with
+  `stream: true` is server-sent events. The deltas are the grounded answer.
+  Provider tokens are held until the citation rules accept or replace them.
+  `/ingest` rewrites the chunk file and reindexes Qdrant. `/health` probes
+  Qdrant. Compose profile `docker` runs the app beside Qdrant.
+  `configs/profiles/docker.env` is that profile and holds no secrets.
 
 ### Phase 8 — Advanced (optional)
 - Query transforms (HyDE, multi-query, decomposition), semantic cache,

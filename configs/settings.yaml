@@ -67,6 +67,15 @@ generation:
   # The score is their mean cosine similarity to the user question.
   relevance_questions: 3
 
+serving:
+  # `local` is `python -m rag.serving` on the host. The Compose app service
+  # sets SERVING__PROFILE=docker, SERVING__HOST=0.0.0.0, and
+  # QDRANT__URL=http://qdrant:6333. See configs/profiles/docker.env.
+  host: 127.0.0.1
+  port: 8000
+  log_level: info
+  profile: local
+
 routing:
   # Best cross-encoder probability required before the model is called.
   # The reranker score is in (0, 1). Below this, the ask path returns the

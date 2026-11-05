@@ -9,11 +9,12 @@ uncited text is not kept.
 
 import json
 import re
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from rag.core.errors import GenerationError
+from rag.core.errors import GenerationError, LLMError
 from rag.core.interfaces import LLMClient, LLMMessage, LLMResponse
 from rag.core.trace import RequestTrace
 from rag.generation.types import INSUFFICIENT_CONTEXT, InsufficientReason
@@ -97,12 +98,18 @@ def request_json[T](
     *,
     max_tokens: int,
     trace: RequestTrace | None = None,
+    stream: bool = False,
 ) -> tuple[T, tuple[LLMResponse, ...]]:
     """Ask for one JSON object and check it. A bad reply is retried once.
 
     The retry shows the model its own reply and the short reason it failed.
     The second failure raises GenerationError. The reason does not include
     the reply text.
+
+    `stream` joins provider deltas before the check. The joined text follows
+    the same rules as one `complete` reply. A caller can show the accepted
+    answer after this returns. It should not show the raw deltas: a later
+    citation rule may replace that text.
     """
 
     if max_tokens <= 0:
@@ -113,7 +120,10 @@ def request_json[T](
     conversation = list(messages)
     last_error = "model reply could not be read"
     for attempt in range(2):
-        response = llm.complete(conversation, max_tokens=max_tokens, trace=trace)
+        if stream:
+            response = _collect_stream(llm, conversation, max_tokens=max_tokens, trace=trace)
+        else:
+            response = llm.complete(conversation, max_tokens=max_tokens, trace=trace)
         responses.append(response)
         try:
             payload = extract_json_object(response.content)
@@ -134,6 +144,41 @@ def request_json[T](
                 ),
             ]
     raise GenerationError(f"model reply could not be read: {last_error}") from None
+
+
+def _collect_stream(
+    llm: LLMClient,
+    messages: Sequence[LLMMessage],
+    *,
+    max_tokens: int,
+    trace: RequestTrace | None,
+) -> LLMResponse:
+    """Join one streamed completion into the same shape as `complete`."""
+
+    started = time.perf_counter()
+    parts: list[str] = []
+    model = ""
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    for event in llm.stream(messages, max_tokens=max_tokens, trace=trace):
+        if event.text:
+            parts.append(event.text)
+        if event.model:
+            model = event.model
+        if event.prompt_tokens is not None:
+            prompt_tokens = event.prompt_tokens
+        if event.completion_tokens is not None:
+            completion_tokens = event.completion_tokens
+    text = "".join(parts).strip()
+    if not text:
+        raise LLMError("model returned an empty answer")
+    return LLMResponse(
+        content=text,
+        model=model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        latency_ms=(time.perf_counter() - started) * 1000,
+    )
 
 
 def _fields(payload: dict[str, Any]) -> tuple[bool, str, list[int]]:

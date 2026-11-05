@@ -59,6 +59,32 @@ class GroundedGenerator:
     ) -> GroundedAnswer:
         """Answer `query` from `chunks`. The chunks should already be best first."""
 
+        return self._generate(query, chunks, trace=trace, stream=False)
+
+    def generate_stream(
+        self,
+        query: str,
+        chunks: Sequence[ContextSource],
+        *,
+        trace: RequestTrace | None = None,
+    ) -> GroundedAnswer:
+        """Same rules as `generate`. The provider stream is joined first.
+
+        The returned text is the grounded answer, which can replace the
+        model's own words. Callers that stream to a person should send this
+        text, not the provider deltas.
+        """
+
+        return self._generate(query, chunks, trace=trace, stream=True)
+
+    def _generate(
+        self,
+        query: str,
+        chunks: Sequence[ContextSource],
+        *,
+        trace: RequestTrace | None,
+        stream: bool,
+    ) -> GroundedAnswer:
         cleaned = query.strip()
         if not cleaned:
             raise ValueError("query text is empty")
@@ -84,6 +110,7 @@ class GroundedGenerator:
                 interpret,
                 max_tokens=self._max_tokens,
                 trace=trace,
+                stream=stream,
             )
         except GenerationError:
             if trace is not None:
