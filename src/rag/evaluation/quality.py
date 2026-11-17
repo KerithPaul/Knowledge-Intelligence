@@ -35,14 +35,13 @@ can be negative, so the weighted score can be negative. No facts on either
 side leaves the factual score empty, and the weighted score is empty too.
 """
 
-import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from rag.core.errors import GenerationError
 from rag.core.interfaces import EmbeddingClient, LLMClient, LLMMessage
-from rag.core.trace import RequestTrace
+from rag.core.trace import RequestTrace, open_span
 from rag.evaluation.generation import cosine_similarity, faithfulness
 from rag.generation.context import render_context
 from rag.generation.parse import request_json
@@ -245,33 +244,30 @@ def _measure_precision(
     max_tokens: int,
     trace: RequestTrace | None,
 ) -> ContextPrecisionResult:
-    started = time.perf_counter()
-    if not blocks:
-        result = ContextPrecisionResult(score=0.0, useful=())
-    else:
-        flags, _responses = request_json(
-            llm,
-            [
-                LLMMessage(role="system", content=CONTEXT_PRECISION_SYSTEM),
-                LLMMessage(
-                    role="user",
-                    content=context_precision_user(query, reference, render_context(blocks)),
-                ),
-            ],
-            _precision_interpreter(len(blocks)),
-            max_tokens=max_tokens,
-            trace=trace,
-        )
-        result = ContextPrecisionResult(score=context_precision(flags), useful=flags)
-    if trace is not None:
-        trace.record(
-            "evaluation.context_precision",
-            (time.perf_counter() - started) * 1000,
+    with open_span(trace, "evaluation.context_precision", observation="evaluator") as span:
+        if not blocks:
+            result = ContextPrecisionResult(score=0.0, useful=())
+        else:
+            flags, _responses = request_json(
+                llm,
+                [
+                    LLMMessage(role="system", content=CONTEXT_PRECISION_SYSTEM),
+                    LLMMessage(
+                        role="user",
+                        content=context_precision_user(query, reference, render_context(blocks)),
+                    ),
+                ],
+                _precision_interpreter(len(blocks)),
+                max_tokens=max_tokens,
+                trace=trace,
+            )
+            result = ContextPrecisionResult(score=context_precision(flags), useful=flags)
+        span.set(
             score=result.score,
             blocks=len(result.useful),
             useful=sum(1 for flag in result.useful if flag),
         )
-    return result
+        return result
 
 
 def _measure_recall(
@@ -282,47 +278,44 @@ def _measure_recall(
     max_tokens: int,
     trace: RequestTrace | None,
 ) -> ContextRecallResult:
-    started = time.perf_counter()
-    claims, _responses = request_json(
-        llm,
-        [
-            LLMMessage(role="system", content=CLAIMS_SYSTEM),
-            LLMMessage(role="user", content=claims_user(reference)),
-        ],
-        _interpret_claims,
-        max_tokens=max_tokens,
-        trace=trace,
-    )
-    if not claims:
-        result = ContextRecallResult(score=None, claims=(), attributed=())
-    else:
-        flags, _responses = request_json(
+    with open_span(trace, "evaluation.context_recall", observation="evaluator") as span:
+        claims, _responses = request_json(
             llm,
             [
-                LLMMessage(role="system", content=VERDICTS_SYSTEM),
-                LLMMessage(
-                    role="user",
-                    content=verdicts_user(render_context(blocks), claims),
-                ),
+                LLMMessage(role="system", content=CLAIMS_SYSTEM),
+                LLMMessage(role="user", content=claims_user(reference)),
             ],
-            _verdict_interpreter(claims),
+            _interpret_claims,
             max_tokens=max_tokens,
             trace=trace,
         )
-        result = ContextRecallResult(
-            score=context_recall(flags),
-            claims=claims,
-            attributed=flags,
-        )
-    if trace is not None:
-        trace.record(
-            "evaluation.context_recall",
-            (time.perf_counter() - started) * 1000,
+        if not claims:
+            result = ContextRecallResult(score=None, claims=(), attributed=())
+        else:
+            flags, _responses = request_json(
+                llm,
+                [
+                    LLMMessage(role="system", content=VERDICTS_SYSTEM),
+                    LLMMessage(
+                        role="user",
+                        content=verdicts_user(render_context(blocks), claims),
+                    ),
+                ],
+                _verdict_interpreter(claims),
+                max_tokens=max_tokens,
+                trace=trace,
+            )
+            result = ContextRecallResult(
+                score=context_recall(flags),
+                claims=claims,
+                attributed=flags,
+            )
+        span.set(
             score=result.score,
             claims=len(result.claims),
             attributed=sum(1 for flag in result.attributed if flag),
         )
-    return result
+        return result
 
 
 def _measure_correctness(
@@ -335,41 +328,38 @@ def _measure_correctness(
     max_tokens: int,
     trace: RequestTrace | None,
 ) -> AnswerCorrectnessResult:
-    started = time.perf_counter()
-    facts, _responses = request_json(
-        llm,
-        [
-            LLMMessage(role="system", content=CLASSIFY_SYSTEM),
-            LLMMessage(role="user", content=classify_user(answer, reference)),
-        ],
-        _interpret_facts,
-        max_tokens=max_tokens,
-        trace=trace,
-    )
-    vectors = embedder.embed_passages([answer, reference], trace=trace)
-    if len(vectors) != 2:
-        raise ValueError("the embedder must return one vector per passage")
-    semantic = cosine_similarity(vectors[0], vectors[1])
-    factual = facts.factual_score
-    weighted = None
-    if factual is not None:
-        weighted = answer_correctness(factual, semantic, factual_weight=factual_weight)
-    result = AnswerCorrectnessResult(
-        score=weighted,
-        factual_score=factual,
-        semantic_similarity=semantic,
-        facts=facts,
-        factual_weight=factual_weight,
-    )
-    if trace is not None:
-        trace.record(
-            "evaluation.answer_correctness",
-            (time.perf_counter() - started) * 1000,
+    with open_span(trace, "evaluation.answer_correctness", observation="evaluator") as span:
+        facts, _responses = request_json(
+            llm,
+            [
+                LLMMessage(role="system", content=CLASSIFY_SYSTEM),
+                LLMMessage(role="user", content=classify_user(answer, reference)),
+            ],
+            _interpret_facts,
+            max_tokens=max_tokens,
+            trace=trace,
+        )
+        vectors = embedder.embed_passages([answer, reference], trace=trace)
+        if len(vectors) != 2:
+            raise ValueError("the embedder must return one vector per passage")
+        semantic = cosine_similarity(vectors[0], vectors[1])
+        factual = facts.factual_score
+        weighted = None
+        if factual is not None:
+            weighted = answer_correctness(factual, semantic, factual_weight=factual_weight)
+        result = AnswerCorrectnessResult(
+            score=weighted,
+            factual_score=factual,
+            semantic_similarity=semantic,
+            facts=facts,
+            factual_weight=factual_weight,
+        )
+        span.set(
             score=result.score,
             factual_score=result.factual_score,
             semantic_similarity=result.semantic_similarity,
         )
-    return result
+        return result
 
 
 def _precision_interpreter(expected: int) -> Callable[[dict[str, Any]], tuple[bool, ...]]:

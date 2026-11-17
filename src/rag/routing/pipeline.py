@@ -18,12 +18,11 @@ once a route is chosen. Spans do not store the answer text.
 """
 
 import math
-import time
 from collections.abc import Iterator, Sequence
 from typing import Protocol
 
 from rag.core.config import Settings
-from rag.core.trace import RequestTrace
+from rag.core.trace import RequestTrace, open_span
 from rag.generation.pipeline import GroundedGenerator, open_generator
 from rag.generation.types import ContextSource, GroundedAnswer
 from rag.retrieval.filters import MetadataFilter
@@ -148,17 +147,16 @@ class Router:
             trace=trace,
         )
         chosen = tuple(chunks)
-        started = time.perf_counter()
-        best = _best_score(chosen)
-        passed = best is not None and best >= self._threshold
-        _record_score(
-            trace,
-            latency_ms=(time.perf_counter() - started) * 1000,
-            threshold=self._threshold,
-            chunk_count=len(chosen),
-            best=best,
-            passed=passed,
-        )
+        with open_span(trace, "routing.score", observation="span") as span:
+            best = _best_score(chosen)
+            passed = best is not None and best >= self._threshold
+            span.set(
+                threshold=self._threshold,
+                chunk_count=len(chosen),
+                passed=passed,
+            )
+            if best is not None:
+                span.set(best_rerank_score=best)
         return chosen, best, passed
 
     def _route(
@@ -296,40 +294,15 @@ def _refused(
     )
 
 
-def _record_score(
-    trace: RequestTrace | None,
-    *,
-    latency_ms: float,
-    threshold: float,
-    chunk_count: int,
-    best: float | None,
-    passed: bool,
-) -> None:
-    if trace is None:
-        return
-    attributes: dict[str, object] = {
-        "threshold": threshold,
-        "chunk_count": chunk_count,
-        "passed": passed,
-    }
-    if best is not None:
-        attributes["best_rerank_score"] = best
-    trace.record("routing.score", latency_ms, **attributes)
-
-
 def _record_decision(trace: RequestTrace | None, routed: RoutedAnswer) -> None:
-    if trace is None:
-        return
-    started = time.perf_counter()
-    attributes: dict[str, object] = {
-        "route": routed.route,
-        "decided_by": routed.decided_by,
-        "threshold": routed.threshold,
-        "chunk_count": len(routed.chunks),
-    }
-    if routed.best_rerank_score is not None:
-        attributes["best_rerank_score"] = routed.best_rerank_score
-    if routed.reason is not None:
-        attributes["reason"] = routed.reason
-    latency_ms = (time.perf_counter() - started) * 1000
-    trace.record("routing.decision", latency_ms, **attributes)
+    with open_span(trace, "routing.decision", observation="span") as span:
+        span.set(
+            route=routed.route,
+            decided_by=routed.decided_by,
+            threshold=routed.threshold,
+            chunk_count=len(routed.chunks),
+        )
+        if routed.best_rerank_score is not None:
+            span.set(best_rerank_score=routed.best_rerank_score)
+        if routed.reason is not None:
+            span.set(reason=routed.reason)

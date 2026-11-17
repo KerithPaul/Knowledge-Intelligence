@@ -6,7 +6,8 @@
 > Web search is deferred until a later agent tool.
 
 **Status:** Phase 0 through the Phase 7 API are in the tree.
-Web search is deferred. Phase 8 is not started. The harness command is
+Web search is deferred. Langfuse tracing is in. The rest of Phase 8 is not
+started. The harness command is
 `python -m rag.evaluation`. The API command is `python -m rag.serving`.
 A live RAGAS or DeepEval run is optional and stays out of the default install.
 **Created:** 2026-10-26
@@ -150,6 +151,9 @@ Evaluation is a first-class concern at **every** phase, not only Phase 6.
 ### Phase 8 — Advanced (optional)
 - Query transforms (HyDE, multi-query, decomposition), semantic cache,
   guardrails, Langfuse tracing, CI eval-gate.
+- Langfuse tracing is in (`core/observability.py`). It stays off unless
+  `langfuse.enabled` is true and both keys are set. The other items are
+  not started.
 
 ---
 

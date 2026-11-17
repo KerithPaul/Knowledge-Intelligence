@@ -17,10 +17,12 @@ def test_tokens_ignore_other_spans_and_missing_usage() -> None:
     trace.record("retrieval.dense", 10.0, count=5)
     trace.record("llm.complete", 4.0, prompt_tokens=100, completion_tokens=20)
     trace.record("llm.complete", 4.0, prompt_tokens=None, completion_tokens=None)
+    trace.record("llm.stream", 3.0, prompt_tokens=10, completion_tokens=4)
+    trace.record("llm.stream", 3.0, prompt_tokens=1)
     usage = tokens_from_trace(trace)
-    assert usage.prompt_tokens == 100
-    assert usage.completion_tokens == 20
-    assert usage.unpriced_calls == 1
+    assert usage.prompt_tokens == 110
+    assert usage.completion_tokens == 24
+    assert usage.unpriced_calls == 2
     assert stage_times(trace)["llm.complete"] == 8.0
     stages = mean_stages([{"llm.complete": 8.0}, {"llm.complete": 2.0, "routing.decision": 1.0}])
     by_name = {stage.name: stage for stage in stages}

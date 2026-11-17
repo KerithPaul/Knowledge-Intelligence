@@ -2,10 +2,12 @@
 
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from qdrant_client import QdrantClient, models
 
+from memory_sink import MemorySink
 from rag.core.config import load_settings
 from rag.core.errors import RetrievalError
 from rag.core.trace import RequestTrace
@@ -123,7 +125,8 @@ def test_rerank_can_outrank_a_higher_rrf_score(tmp_path: Path) -> None:
     # a is rank 1 for both dense and BM25, so its RRF score is higher.
     # The reranker is allowed to put b first anyway.
     reranker.scores = {"zebra zebra zebra": 0.05, "zebra other": 0.95}
-    trace = RequestTrace()
+    sink = MemorySink()
+    trace = RequestTrace(sink=sink)
     hits = retriever.retrieve("zebra", top_n=2, top_k=2, trace=trace)
     assert hits[1].rrf_score > hits[0].rrf_score
     assert [hit.chunk_id for hit in hits] == ["b.md#0000", "a.md#0000"]
@@ -141,6 +144,7 @@ def test_rerank_can_outrank_a_higher_rrf_score(tmp_path: Path) -> None:
     assert "retrieval.rerank" in names
     for span in trace.spans:
         assert "zebra" not in span.attributes.values()
+    assert "zebra" not in str([(row.attributes, row.output) for row in sink.rows])
 
 
 def test_equal_rerank_scores_keep_the_higher_rrf_score(tmp_path: Path) -> None:
@@ -317,7 +321,8 @@ def test_cli_prints_the_top_hit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                 )
             ]
 
-    monkeypatch.setattr("rag.retrieval.__main__.get_settings", lambda: object())
+    settings = SimpleNamespace(langfuse=SimpleNamespace(enabled=False))
+    monkeypatch.setattr("rag.retrieval.__main__.get_settings", lambda: settings)
     monkeypatch.setattr("rag.retrieval.__main__.open_retriever", lambda settings: _Fake())
     main(["how does forking work", "--source", "hermes/acp-internals.md"])
     printed = capsys.readouterr().out

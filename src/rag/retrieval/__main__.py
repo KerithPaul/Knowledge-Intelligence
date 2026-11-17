@@ -11,8 +11,10 @@ Examples:
 """
 
 import argparse
+import uuid
 
 from rag.core.config import get_settings
+from rag.core.observability import tracing
 from rag.evaluation.golden import DEFAULT_GOLDEN, DEFAULT_REPORT, load_retrieval_cases
 from rag.evaluation.retrieval import (
     QueryScore,
@@ -33,34 +35,52 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit("pass a query or --eval")
     settings = get_settings()
     retriever = open_retriever(settings)
-    if args.eval:
-        cases = load_retrieval_cases(DEFAULT_GOLDEN)
-        rows = []
-        for case in cases:
-            hits = retriever.retrieve(case.query)
-            rows.append(
-                (
-                    case.query,
-                    [hit.chunk_id for hit in hits],
-                    set(case.relevant_chunk_ids),
+    with tracing(settings) as tracer:
+        if args.eval:
+            cases = load_retrieval_cases(DEFAULT_GOLDEN)
+            rows = []
+            for case in cases:
+                with tracer.root(
+                    "retrieval",
+                    seed=uuid.uuid4().hex,
+                    tags=("evaluation",),
+                    environment="evaluation",
+                    input={"query": case.query},
+                ) as root:
+                    hits = retriever.retrieve(case.query, trace=tracer.trace())
+                    root.set_output(_hit_output(hits))
+                rows.append(
+                    (
+                        case.query,
+                        [hit.chunk_id for hit in hits],
+                        set(case.relevant_chunk_ids),
+                    )
                 )
+            report = score_queries(rows, k=settings.retrieval.top_k)
+            write_retrieval_report(report, DEFAULT_REPORT)
+            _print_report(report)
+            return
+        metadata = MetadataFilter(
+            sources=tuple(args.source),
+            doc_titles=tuple(args.doc_title),
+            chunk_ids=tuple(args.chunk_id),
+            heading=args.heading,
+        )
+        with tracer.root(
+            "retrieval",
+            seed=uuid.uuid4().hex,
+            tags=("cli",),
+            environment="cli",
+            input={"query": args.query},
+        ) as root:
+            hits = retriever.retrieve(
+                args.query,
+                metadata_filter=None if metadata.is_empty() else metadata,
+                top_n=args.top_n,
+                top_k=args.top_k,
+                trace=tracer.trace(),
             )
-        report = score_queries(rows, k=settings.retrieval.top_k)
-        write_retrieval_report(report, DEFAULT_REPORT)
-        _print_report(report)
-        return
-    metadata = MetadataFilter(
-        sources=tuple(args.source),
-        doc_titles=tuple(args.doc_title),
-        chunk_ids=tuple(args.chunk_id),
-        heading=args.heading,
-    )
-    hits = retriever.retrieve(
-        args.query,
-        metadata_filter=None if metadata.is_empty() else metadata,
-        top_n=args.top_n,
-        top_k=args.top_k,
-    )
+            root.set_output(_hit_output(hits))
     if not hits:
         print("no chunks")
         return
@@ -105,6 +125,21 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-n", type=int, default=None, help="Candidate pool before rerank.")
     parser.add_argument("--top-k", type=int, default=None, help="How many chunks to print.")
     return parser
+
+
+def _hit_output(hits: list[RetrievedChunk]) -> dict[str, list[dict[str, object]]]:
+    """Ids and scores only. The printed preview stays on the terminal."""
+
+    return {
+        "chunks": [
+            {
+                "chunk_id": hit.chunk_id,
+                "rank": hit.rank,
+                "rerank_score": hit.rerank_score,
+            }
+            for hit in hits
+        ]
+    }
 
 
 def _print_hit(hit: RetrievedChunk) -> None:

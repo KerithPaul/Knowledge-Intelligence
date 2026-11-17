@@ -50,7 +50,16 @@ def _write(tmp_path: Path, name: str, text: str) -> Path:
 
 
 def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("GROQ_API_KEY", "TAVILY_API_KEY", "LLM__MODEL", "LLM__TEMPERATURE"):
+    for name in (
+        "GROQ_API_KEY",
+        "TAVILY_API_KEY",
+        "LLM__MODEL",
+        "LLM__TEMPERATURE",
+        "LANGFUSE__ENABLED",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE__BASE_URL",
+    ):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -65,6 +74,8 @@ def test_repository_yaml_sets_the_evaluation_prices() -> None:
     assert settings.evaluation.prompt_usd_per_million == 0.075
     assert settings.evaluation.completion_usd_per_million == 0.30
     assert settings.evaluation.synthesize_limit == 5
+    assert settings.langfuse.enabled is False
+    assert settings.langfuse.base_url == "https://cloud.langfuse.com"
 
 
 def test_yaml_values_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -176,6 +187,10 @@ def test_repo_yaml_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert settings.reranker.batch_size == 16
     assert settings.reranker.max_length == 512
     assert settings.groq_api_key is None
+    assert settings.langfuse.enabled is False
+    assert settings.langfuse.base_url == "https://cloud.langfuse.com"
+    assert settings.langfuse_public_key is None
+    assert settings.langfuse_secret_key is None
 
 
 def test_overlap_must_be_smaller_than_chunk_size(
@@ -233,4 +248,8 @@ def test_get_settings_reads_real_files(monkeypatch: pytest.MonkeyPatch) -> None:
     dumped = repr(settings)
     if settings.groq_api_key is not None:
         assert settings.groq_api_key.get_secret_value() not in dumped
+    if settings.langfuse_public_key is not None:
+        assert settings.langfuse_public_key.get_secret_value() not in dumped
+    if settings.langfuse_secret_key is not None:
+        assert settings.langfuse_secret_key.get_secret_value() not in dumped
     get_settings.cache_clear()

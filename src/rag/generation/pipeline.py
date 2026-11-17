@@ -19,7 +19,7 @@ from typing import Any
 from rag.core.config import Settings
 from rag.core.errors import GenerationError
 from rag.core.interfaces import LLMClient, LLMMessage, LLMResponse
-from rag.core.trace import RequestTrace
+from rag.core.trace import RequestTrace, open_span
 from rag.generation.context import assemble_context, render_context
 from rag.generation.parse import ParsedDraft, interpret_answer, request_json
 from rag.generation.prompt import SYSTEM_PROMPT, user_message
@@ -89,48 +89,57 @@ class GroundedGenerator:
         if not cleaned:
             raise ValueError("query text is empty")
         blocks = assemble_context(chunks, limit=self._limit)
-        if not blocks:
-            answer = _empty_answer(cleaned)
-            _record(trace, answer, retries=0, latency_ms=0.0)
-            return answer
-
-        started = time.perf_counter()
-        messages = [
-            LLMMessage(role="system", content=SYSTEM_PROMPT),
-            LLMMessage(role="user", content=user_message(cleaned, render_context(blocks))),
-        ]
-
-        def interpret(payload: dict[str, Any]) -> ParsedDraft:
-            return interpret_answer(payload, context_size=len(blocks))
-
-        try:
-            draft, responses = request_json(
-                self._llm,
-                messages,
-                interpret,
-                max_tokens=self._max_tokens,
-                trace=trace,
-                stream=stream,
-            )
-        except GenerationError:
-            if trace is not None:
-                trace.record(
-                    "generation.answer",
-                    (time.perf_counter() - started) * 1000,
-                    context_chunks=len(blocks),
-                    retries=1,
-                    error="unreadable",
+        with open_span(trace, "generation.answer", observation="chain") as span:
+            if not blocks:
+                answer = _empty_answer(cleaned)
+                span.set(
+                    context_chunks=0,
+                    citations=0,
+                    retries=0,
+                    sufficient=False,
+                    reason="empty_context",
                 )
-            raise
-        answer = _from_draft(
-            cleaned,
-            blocks,
-            draft,
-            responses,
-            latency_ms=(time.perf_counter() - started) * 1000,
-        )
-        _record(trace, answer, retries=len(responses) - 1, latency_ms=answer.latency_ms)
-        return answer
+                span.set_output(answer.answer)
+                return answer
+
+            started = time.perf_counter()
+            messages = [
+                LLMMessage(role="system", content=SYSTEM_PROMPT),
+                LLMMessage(role="user", content=user_message(cleaned, render_context(blocks))),
+            ]
+
+            def interpret(payload: dict[str, Any]) -> ParsedDraft:
+                return interpret_answer(payload, context_size=len(blocks))
+
+            try:
+                draft, responses = request_json(
+                    self._llm,
+                    messages,
+                    interpret,
+                    max_tokens=self._max_tokens,
+                    trace=trace,
+                    stream=stream,
+                )
+            except GenerationError:
+                span.set(context_chunks=len(blocks), retries=1, error="unreadable")
+                raise
+            answer = _from_draft(
+                cleaned,
+                blocks,
+                draft,
+                responses,
+                latency_ms=(time.perf_counter() - started) * 1000,
+            )
+            span.set(
+                context_chunks=len(answer.context),
+                citations=len(answer.citations),
+                retries=len(responses) - 1,
+                sufficient=answer.sufficient,
+            )
+            if answer.insufficient_reason is not None:
+                span.set(reason=answer.insufficient_reason)
+            span.set_output(answer.answer)
+            return answer
 
 
 def open_generator(settings: Settings, *, llm: LLMClient | None = None) -> GroundedGenerator:
@@ -205,23 +214,3 @@ def _sum_tokens(responses: Sequence[LLMResponse], name: str) -> int | None:
             return None
         total += value
     return total
-
-
-def _record(
-    trace: RequestTrace | None,
-    answer: GroundedAnswer,
-    *,
-    retries: int,
-    latency_ms: float,
-) -> None:
-    if trace is None:
-        return
-    attributes: dict[str, object] = {
-        "context_chunks": len(answer.context),
-        "citations": len(answer.citations),
-        "retries": retries,
-        "sufficient": answer.sufficient,
-    }
-    if answer.insufficient_reason is not None:
-        attributes["reason"] = answer.insufficient_reason
-    trace.record("generation.answer", latency_ms, **attributes)

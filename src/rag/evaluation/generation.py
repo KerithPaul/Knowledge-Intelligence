@@ -21,14 +21,13 @@ Context precision, context recall, and answer correctness are in
 """
 
 import math
-import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from rag.core.errors import GenerationError
 from rag.core.interfaces import EmbeddingClient, LLMClient, LLMMessage
-from rag.core.trace import RequestTrace
+from rag.core.trace import RequestTrace, open_span
 from rag.generation.context import render_context
 from rag.generation.parse import request_json
 from rag.generation.prompt import (
@@ -180,48 +179,41 @@ def _measure_faithfulness(
     max_tokens: int,
     trace: RequestTrace | None,
 ) -> FaithfulnessResult:
-    started = time.perf_counter()
-    claims, _responses = request_json(
-        llm,
-        [
-            LLMMessage(role="system", content=CLAIMS_SYSTEM),
-            LLMMessage(role="user", content=claims_user(answer.answer)),
-        ],
-        _interpret_claims,
-        max_tokens=max_tokens,
-        trace=trace,
-    )
-    if not claims:
-        result = FaithfulnessResult(score=None, claims=())
-    else:
-        flags, _responses = request_json(
+    with open_span(trace, "generation.faithfulness", observation="evaluator") as span:
+        claims, _responses = request_json(
             llm,
             [
-                LLMMessage(role="system", content=VERDICTS_SYSTEM),
-                LLMMessage(
-                    role="user",
-                    content=verdicts_user(render_context(answer.context), claims),
-                ),
+                LLMMessage(role="system", content=CLAIMS_SYSTEM),
+                LLMMessage(role="user", content=claims_user(answer.answer)),
             ],
-            _verdict_interpreter(claims),
+            _interpret_claims,
             max_tokens=max_tokens,
             trace=trace,
         )
-        verdicts = tuple(
-            ClaimVerdict(claim=claim, supported=flag)
-            for claim, flag in zip(claims, flags, strict=True)
-        )
-        result = FaithfulnessResult(score=faithfulness(flags), claims=verdicts)
-    if trace is not None:
+        if not claims:
+            result = FaithfulnessResult(score=None, claims=())
+        else:
+            flags, _responses = request_json(
+                llm,
+                [
+                    LLMMessage(role="system", content=VERDICTS_SYSTEM),
+                    LLMMessage(
+                        role="user",
+                        content=verdicts_user(render_context(answer.context), claims),
+                    ),
+                ],
+                _verdict_interpreter(claims),
+                max_tokens=max_tokens,
+                trace=trace,
+            )
+            verdicts = tuple(
+                ClaimVerdict(claim=claim, supported=flag)
+                for claim, flag in zip(claims, flags, strict=True)
+            )
+            result = FaithfulnessResult(score=faithfulness(flags), claims=verdicts)
         supported = sum(1 for claim in result.claims if claim.supported)
-        trace.record(
-            "generation.faithfulness",
-            (time.perf_counter() - started) * 1000,
-            score=result.score,
-            claims=len(result.claims),
-            supported=supported,
-        )
-    return result
+        span.set(score=result.score, claims=len(result.claims), supported=supported)
+        return result
 
 
 def _measure_relevance(
@@ -233,35 +225,32 @@ def _measure_relevance(
     max_tokens: int,
     trace: RequestTrace | None,
 ) -> AnswerRelevanceResult:
-    started = time.perf_counter()
-    questions, _responses = request_json(
-        llm,
-        [
-            LLMMessage(role="system", content=QUESTIONS_SYSTEM),
-            LLMMessage(role="user", content=questions_user(answer.answer, count)),
-        ],
-        _question_interpreter(count),
-        max_tokens=max_tokens,
-        trace=trace,
-    )
-    origin = embedder.embed_query(answer.query, trace=trace)
-    vectors = [embedder.embed_query(item.question, trace=trace) for item in questions]
-    similarities = tuple(cosine_similarity(origin, vector) for vector in vectors)
-    noncommittal = all(item.noncommittal for item in questions)
-    result = AnswerRelevanceResult(
-        score=answer_relevance(similarities, noncommittal=noncommittal),
-        questions=questions,
-        similarities=similarities,
-    )
-    if trace is not None:
-        trace.record(
-            "generation.answer_relevance",
-            (time.perf_counter() - started) * 1000,
+    with open_span(trace, "generation.answer_relevance", observation="evaluator") as span:
+        questions, _responses = request_json(
+            llm,
+            [
+                LLMMessage(role="system", content=QUESTIONS_SYSTEM),
+                LLMMessage(role="user", content=questions_user(answer.answer, count)),
+            ],
+            _question_interpreter(count),
+            max_tokens=max_tokens,
+            trace=trace,
+        )
+        origin = embedder.embed_query(answer.query, trace=trace)
+        vectors = [embedder.embed_query(item.question, trace=trace) for item in questions]
+        similarities = tuple(cosine_similarity(origin, vector) for vector in vectors)
+        noncommittal = all(item.noncommittal for item in questions)
+        result = AnswerRelevanceResult(
+            score=answer_relevance(similarities, noncommittal=noncommittal),
+            questions=questions,
+            similarities=similarities,
+        )
+        span.set(
             score=result.score,
             questions=len(result.questions),
             noncommittal=noncommittal,
         )
-    return result
+        return result
 
 
 def _interpret_claims(payload: dict[str, Any]) -> tuple[str, ...]:

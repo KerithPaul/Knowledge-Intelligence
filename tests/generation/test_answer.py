@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from memory_sink import MemorySink
 from rag.core.config import load_settings
 from rag.core.errors import GenerationError
 from rag.core.interfaces import LLMClient, LLMMessage, LLMResponse
@@ -68,6 +69,29 @@ def test_cited_answer_maps_markers_back_to_chunks() -> None:
     assert "reason" not in span.attributes
     blob = " ".join(str(value) for value in span.attributes.values())
     assert "Forking copies the session" not in blob
+    assert "The fork copies the session." not in blob
+
+
+def test_an_uncited_draft_is_not_the_span_output() -> None:
+    raw = "Secret uncited fact that must not leave the process."
+    sink = MemorySink()
+    trace = RequestTrace(sink=sink)
+    answer = GroundedGenerator(
+        _ScriptedLLM([_reply(raw, citations=[])]),
+        max_context_chunks=2,
+        max_tokens=64,
+    ).generate(
+        "How does forking work?",
+        [_chunk("a", "The fork copies the session.")],
+        trace=trace,
+    )
+    assert answer.answer == INSUFFICIENT_CONTEXT
+    assert answer.insufficient_reason == "uncited"
+    row = sink.rows[-1]
+    assert row.name == "generation.answer"
+    assert row.output == INSUFFICIENT_CONTEXT
+    blob = str([(item.attributes, item.output) for item in sink.rows])
+    assert raw not in blob
     assert "The fork copies the session." not in blob
 
 

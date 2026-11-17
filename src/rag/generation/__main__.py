@@ -11,11 +11,15 @@ Examples:
 """
 
 import argparse
+import uuid
+from typing import Any
 
 from rag.core.clients import build_embedding_client, build_llm_client
 from rag.core.config import Settings, get_settings
 from rag.core.errors import GenerationError
 from rag.core.interfaces import EmbeddingClient, LLMClient
+from rag.core.observability import tracing
+from rag.core.trace import RequestTrace
 from rag.evaluation.generation import GenerationScore, score_answer
 from rag.generation.pipeline import open_generator
 from rag.generation.types import GroundedAnswer
@@ -42,19 +46,44 @@ def main(argv: list[str] | None = None) -> None:
         chunk_ids=tuple(args.chunk_id),
         heading=args.heading,
     )
-    hits = retriever.retrieve(
-        args.query,
-        metadata_filter=None if metadata.is_empty() else metadata,
-        top_n=args.top_n,
-        top_k=args.top_k,
-    )
-    try:
-        answer = generator.generate(args.query, hits)
-    except GenerationError as exc:
-        raise SystemExit(f"could not read the model reply: {exc}") from None
+    with tracing(settings) as tracer:
+        with tracer.root(
+            "generation",
+            seed=uuid.uuid4().hex,
+            tags=("cli",),
+            environment="cli",
+            input={"query": args.query},
+        ) as root:
+            trace = tracer.trace()
+            hits = retriever.retrieve(
+                args.query,
+                metadata_filter=None if metadata.is_empty() else metadata,
+                top_n=args.top_n,
+                top_k=args.top_k,
+                trace=trace,
+            )
+            try:
+                answer = generator.generate(args.query, hits, trace=trace)
+            except GenerationError as exc:
+                root.fail(str(exc))
+                raise SystemExit(f"could not read the model reply: {exc}") from None
+            score = None
+            if args.score:
+                try:
+                    score = _score(
+                        answer,
+                        llm=llm,
+                        embedder=embedder,
+                        settings=settings,
+                        trace=trace,
+                    )
+                except GenerationError as exc:
+                    root.fail(str(exc))
+                    raise SystemExit(f"could not score the answer: {exc}") from None
+            root.set_output(_generation_output(answer, score))
     _print_answer(answer)
-    if args.score:
-        _print_score(_score(answer, llm=llm, embedder=embedder, settings=settings))
+    if score is not None:
+        _print_score(score)
 
 
 def _score(
@@ -63,19 +92,38 @@ def _score(
     llm: LLMClient,
     embedder: EmbeddingClient | None,
     settings: Settings,
+    trace: RequestTrace,
 ) -> GenerationScore:
     if embedder is None:
         raise RuntimeError("scoring requires an embedder")
-    try:
-        return score_answer(
-            answer,
-            llm=llm,
-            embedder=embedder,
-            relevance_questions=settings.generation.relevance_questions,
-            max_tokens=settings.generation.max_tokens,
-        )
-    except GenerationError as exc:
-        raise SystemExit(f"could not score the answer: {exc}") from None
+    return score_answer(
+        answer,
+        llm=llm,
+        embedder=embedder,
+        relevance_questions=settings.generation.relevance_questions,
+        max_tokens=settings.generation.max_tokens,
+        trace=trace,
+    )
+
+
+def _generation_output(answer: GroundedAnswer, score: GenerationScore | None) -> dict[str, Any]:
+    """The accepted answer and the scores. Chunk text and claim text stay out."""
+
+    payload: dict[str, Any] = {
+        "sufficient": answer.sufficient,
+        "reason": answer.insufficient_reason,
+        "answer": answer.answer,
+        "model": answer.model or None,
+        "prompt_tokens": answer.prompt_tokens,
+        "completion_tokens": answer.completion_tokens,
+        "citations": [
+            {"number": item.number, "chunk_id": item.chunk_id} for item in answer.citations
+        ],
+    }
+    if score is not None:
+        payload["faithfulness"] = score.faithfulness.score
+        payload["answer_relevance"] = score.answer_relevance.score
+    return payload
 
 
 def _parser() -> argparse.ArgumentParser:

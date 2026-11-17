@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from memory_sink import MemorySink
 from rag.core.config import load_settings
 from rag.core.errors import GenerationError
 from rag.core.interfaces import LLMClient, LLMMessage, LLMResponse
@@ -42,6 +43,21 @@ def test_a_score_under_the_threshold_skips_the_model() -> None:
     blob = " ".join(str(span.attributes) for span in trace.spans)
     assert INSUFFICIENT_CONTEXT not in blob
     assert "text for a" not in blob
+
+
+def test_a_low_score_does_not_open_a_model_observation() -> None:
+    sink = MemorySink()
+    trace = RequestTrace(sink=sink)
+    Router(
+        _ScriptedRetriever([_chunk("a", 0.1)]),
+        _ScriptedGenerator(sufficient=True),
+        sufficiency_threshold=0.35,
+    ).ask("How does forking work?", trace=trace)
+    names = [row.name for row in sink.rows]
+    assert "generation.answer" not in names
+    assert "llm.complete" not in names
+    assert "llm.stream" not in names
+    assert "text for a" not in str(sink.rows)
 
 
 def test_a_score_equal_to_the_threshold_calls_the_model() -> None:

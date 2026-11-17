@@ -11,7 +11,6 @@ counts those rows. It does not cut the text.
 
 import json
 import statistics
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +20,7 @@ from qdrant_client import QdrantClient
 from rag.core.config import Settings
 from rag.core.errors import IndexingError
 from rag.core.interfaces import EmbeddingClient
-from rag.core.trace import RequestTrace
+from rag.core.trace import RequestTrace, open_span
 from rag.indexing.records import ChunkRecord, load_chunk_records, validate_records
 from rag.indexing.sparse import build_sparse_vectors
 from rag.indexing.store import (
@@ -94,29 +93,26 @@ def index_records(
     if len(set(point_ids)) != len(point_ids):
         raise IndexingError("two chunk ids produced the same Qdrant point id")
 
-    started = time.perf_counter()
     qdrant = settings.qdrant
-    recreated = ensure_collection(
-        client,
-        qdrant,
-        dimension=dimension,
-        embedding_model=embedder.model_name,
-    )
-    upsert_points(client, qdrant, points)
-    pruned = prune_points(client, qdrant.collection, keep=set(point_ids))
-    info = wait_until_green(client, qdrant)
-    point_count = count_points(client, qdrant.collection)
-    if point_count != len(points):
-        raise IndexingError(
-            f"collection {qdrant.collection} has {point_count} points "
-            f"after indexing {len(points)} chunks"
+    with open_span(trace, "indexing.upsert", observation="span") as span:
+        recreated = ensure_collection(
+            client,
+            qdrant,
+            dimension=dimension,
+            embedding_model=embedder.model_name,
         )
-    self_hit = exact_self_hit(client, qdrant, points) if points else None
-    hnsw_hit = hnsw_self_hit(client, qdrant, points) if points else None
-    if trace is not None:
-        trace.record(
-            "indexing.upsert",
-            (time.perf_counter() - started) * 1000,
+        upsert_points(client, qdrant, points)
+        pruned = prune_points(client, qdrant.collection, keep=set(point_ids))
+        info = wait_until_green(client, qdrant)
+        point_count = count_points(client, qdrant.collection)
+        if point_count != len(points):
+            raise IndexingError(
+                f"collection {qdrant.collection} has {point_count} points "
+                f"after indexing {len(points)} chunks"
+            )
+        self_hit = exact_self_hit(client, qdrant, points) if points else None
+        hnsw_hit = hnsw_self_hit(client, qdrant, points) if points else None
+        span.set(
             points=len(points),
             pruned=pruned,
             collection=qdrant.collection,

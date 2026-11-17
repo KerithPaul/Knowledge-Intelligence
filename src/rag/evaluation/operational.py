@@ -4,8 +4,9 @@ Stage times come from the request trace. A later span can include the model
 calls recorded inside it, so the stage table is not added up into the
 end-to-end time. End-to-end time is the clock around the whole question.
 
-Token totals count ``llm.complete`` spans that reported both token numbers.
-A call that omitted usage is counted as unpriced and is left out of the cost.
+Token totals count ``llm.complete`` and ``llm.stream`` spans that reported
+both token numbers. A call that omitted usage is counted as unpriced and is
+left out of the cost.
 Cost is ``tokens / 1_000_000 * usd_per_million``. The prices live in config.
 They are the uncached rates. This report does not see a cached-token split.
 
@@ -41,14 +42,21 @@ class TokenUse:
     unpriced_calls: int
 
 
+_PRICED_SPANS = frozenset({"llm.complete", "llm.stream"})
+
+
 def tokens_from_trace(trace: RequestTrace) -> TokenUse:
-    """Sum usage on ``llm.complete`` spans. Missing usage is unpriced."""
+    """Sum usage on model spans. Missing usage is unpriced.
+
+    A streamed ask records ``llm.stream``. A one-shot ask records
+    ``llm.complete``. Both count when each span has both token numbers.
+    """
 
     prompt = 0
     completion = 0
     unpriced = 0
     for span in trace.spans:
-        if span.name != "llm.complete":
+        if span.name not in _PRICED_SPANS:
             continue
         prompt_tokens = span.attributes.get("prompt_tokens")
         completion_tokens = span.attributes.get("completion_tokens")

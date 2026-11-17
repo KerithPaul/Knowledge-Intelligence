@@ -226,7 +226,7 @@ def test_filters_reach_retrieval() -> None:
 
 
 def _client(**overrides):
-    settings = load_settings()
+    settings = load_settings(langfuse={"enabled": False})
     retriever = overrides.get("retriever", _Retriever([_chunk("a", 0.8)]))
     llm = overrides.get("llm", _JsonLLM(_cited()))
     router = Router(

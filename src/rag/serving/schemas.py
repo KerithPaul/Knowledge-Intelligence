@@ -61,8 +61,13 @@ def ask_payload(
     request_id: str,
     latency_ms: float,
     trace: RequestTrace | None = None,
+    langfuse_trace_id: str | None = None,
 ) -> dict[str, Any]:
-    """Fields a client can render. `trace` is omitted on the SSE answer event."""
+    """Fields a client can render. `trace` is omitted on the SSE answer event.
+
+    `langfuse_trace_id` is omitted when export is off, so the usual body
+    stays the same.
+    """
 
     answer = routed.answer
     citations = () if answer is None else answer.citations
@@ -82,6 +87,8 @@ def ask_payload(
         "completion_tokens": None if answer is None else answer.completion_tokens,
         "latency_ms": latency_ms,
     }
+    if langfuse_trace_id is not None:
+        payload["langfuse_trace_id"] = langfuse_trace_id
     if trace is not None:
         payload["trace"] = trace_payload(trace)
     return payload
@@ -102,6 +109,20 @@ def trace_payload(trace: RequestTrace) -> list[dict[str, Any]]:
         {"name": span.name, "latency_ms": span.latency_ms, "attributes": dict(span.attributes)}
         for span in trace.spans
     ]
+
+
+def trace_event_payload(
+    trace: RequestTrace,
+    request_id: str,
+    *,
+    langfuse_trace_id: str | None = None,
+) -> dict[str, Any]:
+    """The SSE `trace` event. The Langfuse id is omitted when export is off."""
+
+    payload: dict[str, Any] = {"request_id": request_id, "spans": trace_payload(trace)}
+    if langfuse_trace_id is not None:
+        payload["langfuse_trace_id"] = langfuse_trace_id
+    return payload
 
 
 def health_payload(report: HealthReport) -> dict[str, Any]:

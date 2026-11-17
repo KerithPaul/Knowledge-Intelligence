@@ -8,7 +8,6 @@ is missing from that file is a stale index.
 reranker scores those candidates. `top_k` is how many it returns.
 """
 
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,7 +17,7 @@ from qdrant_client import QdrantClient
 from rag.core.config import PROJECT_ROOT, Settings
 from rag.core.errors import RetrievalError
 from rag.core.interfaces import EmbeddingClient, Reranker
-from rag.core.trace import RequestTrace
+from rag.core.trace import RequestTrace, open_span
 from rag.indexing.records import ChunkRecord, load_chunk_records, validate_records
 from rag.retrieval.bm25 import BM25Index
 from rag.retrieval.dense import dense_search, require_collection
@@ -90,57 +89,40 @@ class Retriever:
             raise ValueError("top_k must be less than or equal to top_n")
         allowed = self._allowed(metadata_filter)
 
-        started = time.perf_counter()
-        vector = self._embedder.embed_query(cleaned, trace=trace)
-        dense_hits = dense_search(
-            self._client,
-            self._settings.qdrant,
-            vector,
-            limit=pool,
-            metadata_filter=metadata_filter,
-        )
-        for hit in dense_hits:
-            if hit.chunk_id not in self._by_id:
-                raise RetrievalError(
-                    f"Qdrant returned chunk {hit.chunk_id}, which is not in the chunk file. "
-                    "Run python -m rag.indexing before searching."
-                )
-        if trace is not None:
-            trace.record(
-                "retrieval.dense",
-                (time.perf_counter() - started) * 1000,
-                count=len(dense_hits),
-                collection=self._settings.qdrant.collection,
+        with open_span(trace, "retrieval.dense", observation="retriever") as span:
+            vector = self._embedder.embed_query(cleaned, trace=trace)
+            dense_hits = dense_search(
+                self._client,
+                self._settings.qdrant,
+                vector,
+                limit=pool,
+                metadata_filter=metadata_filter,
             )
+            for hit in dense_hits:
+                if hit.chunk_id not in self._by_id:
+                    raise RetrievalError(
+                        f"Qdrant returned chunk {hit.chunk_id}, which is not in the chunk file. "
+                        "Run python -m rag.indexing before searching."
+                    )
+            span.set(count=len(dense_hits), collection=self._settings.qdrant.collection)
 
-        started = time.perf_counter()
-        bm25_hits = self._bm25.search(cleaned, limit=pool, allowed=allowed)
-        if trace is not None:
-            trace.record(
-                "retrieval.bm25",
-                (time.perf_counter() - started) * 1000,
-                count=len(bm25_hits),
-            )
+        with open_span(trace, "retrieval.bm25", observation="retriever") as span:
+            bm25_hits = self._bm25.search(cleaned, limit=pool, allowed=allowed)
+            span.set(count=len(bm25_hits))
 
-        started = time.perf_counter()
-        fused = reciprocal_rank_fusion(
-            [
-                [hit.chunk_id for hit in dense_hits],
-                [hit.chunk_id for hit in bm25_hits],
-            ],
-            k=self._settings.retrieval.rrf_k,
-            limit=pool,
-        )
-        if trace is not None:
-            trace.record(
-                "retrieval.rrf",
-                (time.perf_counter() - started) * 1000,
-                count=len(fused),
+        with open_span(trace, "retrieval.rrf", observation="span") as span:
+            fused = reciprocal_rank_fusion(
+                [
+                    [hit.chunk_id for hit in dense_hits],
+                    [hit.chunk_id for hit in bm25_hits],
+                ],
                 k=self._settings.retrieval.rrf_k,
+                limit=pool,
             )
+            span.set(count=len(fused), k=self._settings.retrieval.rrf_k)
         if not fused:
-            if trace is not None:
-                trace.record("retrieval.rerank", 0.0, count=0)
+            with open_span(trace, "retrieval.rerank", observation="span") as span:
+                span.set(count=0)
             return []
 
         dense_by_id = {hit.chunk_id: hit for hit in dense_hits}

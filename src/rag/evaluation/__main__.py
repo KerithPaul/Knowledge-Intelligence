@@ -19,11 +19,13 @@ does not install those packages.
 
 import argparse
 import sys
+import uuid
 from pathlib import Path
 
 from rag.core.clients import build_embedding_client, build_llm_client
 from rag.core.config import PROJECT_ROOT, get_settings
 from rag.core.errors import GenerationError
+from rag.core.observability import tracing
 from rag.core.trace import RequestTrace
 from rag.evaluation.crosscheck import (
     DIVERGENCES,
@@ -33,6 +35,7 @@ from rag.evaluation.crosscheck import (
 )
 from rag.evaluation.gate import DEFAULT_BASELINES, check_gate, load_baselines
 from rag.evaluation.harness import (
+    CaseResult,
     build_harness_report,
     gate_metrics,
     load_report_metrics,
@@ -99,22 +102,34 @@ def _run() -> Path:
             raise SystemExit(f"could not read the model reply: {exc}") from None
 
     rows = []
-    for case in cases:
-        try:
-            rows.append(
-                run_case(
-                    case,
-                    ask=ask,
-                    llm=llm,
-                    embedder=embedder,
-                    relevance_questions=settings.generation.relevance_questions,
-                    max_context_chunks=settings.generation.max_context_chunks,
-                    max_tokens=settings.generation.max_tokens,
-                    factual_weight=settings.evaluation.factual_weight,
-                )
-            )
-        except GenerationError as exc:
-            raise SystemExit(f"could not score {case.query!r}: {exc}") from None
+    with tracing(settings) as tracer:
+        for case in cases:
+            with tracer.root(
+                "evaluation.case",
+                seed=uuid.uuid4().hex,
+                tags=("evaluation",),
+                environment="evaluation",
+                input={"query": case.query},
+            ) as root:
+                try:
+                    row = run_case(
+                        case,
+                        ask=ask,
+                        llm=llm,
+                        embedder=embedder,
+                        relevance_questions=settings.generation.relevance_questions,
+                        max_context_chunks=settings.generation.max_context_chunks,
+                        max_tokens=settings.generation.max_tokens,
+                        factual_weight=settings.evaluation.factual_weight,
+                        sink=tracer.sink,
+                    )
+                except (GenerationError, SystemExit) as exc:
+                    root.fail(str(exc))
+                    if isinstance(exc, SystemExit):
+                        raise
+                    raise SystemExit(f"could not score {case.query!r}: {exc}") from None
+                root.set_output(_case_output(row))
+                rows.append(row)
     report = build_harness_report(
         rows,
         k=settings.retrieval.top_k,
@@ -127,6 +142,22 @@ def _run() -> Path:
     write_harness_report(report, DEFAULT_REPORT)
     _print_report(report)
     return DEFAULT_REPORT
+
+
+def _case_output(row: CaseResult) -> dict[str, object]:
+    """Scores for one question. The reference answer stays off the trace."""
+
+    return {
+        "route": row.route,
+        "reason": row.reason,
+        "faithfulness": row.faithfulness,
+        "answer_relevance": row.answer_relevance,
+        "context_precision": row.context_precision,
+        "context_recall": row.context_recall,
+        "answer_correctness": row.answer_correctness,
+        "prompt_tokens": row.prompt_tokens,
+        "completion_tokens": row.completion_tokens,
+    }
 
 
 def _check(report_path: Path, baseline_path: Path) -> None:

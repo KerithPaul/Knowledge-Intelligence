@@ -4,13 +4,12 @@ Query text gets the BGE instruction prefix. Passage text does not.
 sentence-transformers batches the forward pass at batch_size.
 """
 
-import time
 from collections.abc import Sequence
 from typing import Any, Protocol
 
 from rag.core.errors import EmbeddingError
 from rag.core.interfaces import EmbeddingClient
-from rag.core.trace import RequestTrace
+from rag.core.trace import RequestTrace, open_span
 
 
 class Encoder(Protocol):
@@ -116,30 +115,28 @@ class BGEEmbeddingClient(EmbeddingClient):
         trace: RequestTrace | None,
     ) -> list[list[float]]:
         encoder = self._load()
-        started = time.perf_counter()
-        try:
-            raw = encoder.encode(
-                texts,
-                batch_size=self._batch_size,
-                normalize_embeddings=self._normalize,
-                show_progress_bar=False,
-            )
-        except Exception as exc:
-            raise EmbeddingError(str(exc)) from None
-        latency_ms = (time.perf_counter() - started) * 1000
-        vectors = _to_vectors(raw)
-        if len(vectors) != len(texts):
-            raise EmbeddingError(f"model returned {len(vectors)} vectors for {len(texts)} texts")
-        for vector in vectors:
-            if len(vector) != self._dimension:
-                raise EmbeddingError(
-                    f"model {self._model_name} returned dimension {len(vector)}, "
-                    f"config says {self._dimension}"
+        with open_span(trace, "embedding.encode", observation="embedding") as span:
+            try:
+                raw = encoder.encode(
+                    texts,
+                    batch_size=self._batch_size,
+                    normalize_embeddings=self._normalize,
+                    show_progress_bar=False,
                 )
-        if trace is not None:
-            trace.record(
-                "embedding.encode",
-                latency_ms,
+            except Exception as exc:
+                raise EmbeddingError(str(exc)) from None
+            vectors = _to_vectors(raw)
+            if len(vectors) != len(texts):
+                raise EmbeddingError(
+                    f"model returned {len(vectors)} vectors for {len(texts)} texts"
+                )
+            for vector in vectors:
+                if len(vector) != self._dimension:
+                    raise EmbeddingError(
+                        f"model {self._model_name} returned dimension {len(vector)}, "
+                        f"config says {self._dimension}"
+                    )
+            span.set(
                 model=self._model_name,
                 count=len(texts),
                 dimension=self._dimension,

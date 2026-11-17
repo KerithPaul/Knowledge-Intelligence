@@ -12,7 +12,8 @@ uses the HTTP status below.
 import logging
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -30,8 +31,8 @@ from rag.core.errors import (
     MissingSecretError,
     RetrievalError,
 )
+from rag.core.observability import routed_output
 from rag.core.redact import redact_secrets
-from rag.core.trace import RequestTrace
 from rag.retrieval.filters import MetadataFilter
 from rag.routing.events import AskDelta, AskResult, AskStatus
 from rag.routing.pipeline import Router
@@ -47,7 +48,7 @@ from rag.serving.schemas import (
     ingest_payload,
     metadata_from,
     status_payload,
-    trace_payload,
+    trace_event_payload,
 )
 from rag.serving.sse import sse
 
@@ -110,7 +111,13 @@ def create_app(
     loaded = settings if settings is not None else get_settings()
     logger = configure_logging(loaded.serving.log_level)
     service = Service(loaded, router=router, ingest=ingest, health=health)
-    app = FastAPI(title="Knowledge Intelligence", version=__version__)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        yield
+        service.flush_tracer()
+
+    app = FastAPI(title="Knowledge Intelligence", version=__version__, lifespan=lifespan)
     app.add_middleware(RequestIdMiddleware)
     app.state.service = service
     app.state.logger = logger
@@ -125,10 +132,29 @@ def create_app(
     def ingest_route(request: Request) -> JSONResponse:
         request_id = _request_id(request)
         started = time.perf_counter()
-        try:
-            report = service.ingest()
-        except Exception as exc:
-            return _failed(request, exc, request_id=request_id, started=started, query_chars=None)
+        with service.tracer.root(
+            "ingest",
+            seed=request_id,
+            tags=("ingest",),
+            environment=loaded.serving.profile,
+        ) as root:
+            try:
+                report = service.ingest(trace=service.tracer.trace())
+            except Exception as exc:
+                root.fail(str(exc))
+                return _failed(
+                    request, exc, request_id=request_id, started=started, query_chars=None
+                )
+            root.set_output(
+                {
+                    "documents": report.documents,
+                    "chunks": report.chunks,
+                    "points": report.points,
+                    "upserted": report.upserted,
+                    "pruned": report.pruned,
+                    "schema_recreated": report.schema_recreated,
+                }
+            )
         latency_ms = (time.perf_counter() - started) * 1000
         log_request(
             logger,
@@ -161,24 +187,34 @@ def create_app(
                 media_type="text/event-stream",
                 headers={"cache-control": "no-cache", "x-accel-buffering": "no"},
             )
-        trace = RequestTrace()
         started = time.perf_counter()
-        try:
-            routed = service.ask(
-                body.query,
-                metadata_filter=metadata,
-                top_n=body.top_n,
-                top_k=body.top_k,
-                trace=trace,
-            )
-        except Exception as exc:
-            return _failed(
-                request,
-                exc,
-                request_id=request_id,
-                started=started,
-                query_chars=len(body.query),
-            )
+        with service.tracer.root(
+            "ask",
+            seed=request_id,
+            tags=("ask",),
+            environment=loaded.serving.profile,
+            input={"query": body.query},
+        ) as root:
+            trace = service.tracer.trace()
+            try:
+                routed = service.ask(
+                    body.query,
+                    metadata_filter=metadata,
+                    top_n=body.top_n,
+                    top_k=body.top_k,
+                    trace=trace,
+                )
+            except Exception as exc:
+                root.fail(str(exc))
+                return _failed(
+                    request,
+                    exc,
+                    request_id=request_id,
+                    started=started,
+                    query_chars=len(body.query),
+                )
+            root.set_output(routed_output(routed))
+            trace_id = root.trace_id
         latency_ms = (time.perf_counter() - started) * 1000
         log_request(
             logger,
@@ -194,7 +230,13 @@ def create_app(
             profile=loaded.serving.profile,
         )
         return JSONResponse(
-            content=ask_payload(routed, request_id=request_id, latency_ms=latency_ms, trace=trace)
+            content=ask_payload(
+                routed,
+                request_id=request_id,
+                latency_ms=latency_ms,
+                trace=trace,
+                langfuse_trace_id=trace_id,
+            )
         )
 
     return app
@@ -209,45 +251,58 @@ def _ask_events(
     logger: logging.Logger,
     profile: str,
 ) -> Iterator[str]:
-    trace = RequestTrace()
     started = time.perf_counter()
     route = None
     decided_by = None
     reason = None
     error_code = None
     error_detail = None
-    try:
-        for event in service.ask_stream(
-            body.query,
-            metadata_filter=metadata,
-            top_n=body.top_n,
-            top_k=body.top_k,
-            trace=trace,
-        ):
-            if isinstance(event, AskStatus):
-                yield sse("status", status_payload(event, request_id))
-            elif isinstance(event, AskDelta):
-                yield sse("delta", {"request_id": request_id, "text": event.text})
-            elif isinstance(event, AskResult):
-                routed = event.routed
-                route = routed.route
-                decided_by = routed.decided_by
-                reason = routed.reason
-                latency_ms = (time.perf_counter() - started) * 1000
-                yield sse(
-                    "answer",
-                    ask_payload(routed, request_id=request_id, latency_ms=latency_ms),
-                )
-                yield sse(
-                    "trace",
-                    {"request_id": request_id, "spans": trace_payload(trace)},
-                )
-                yield sse("done", {"request_id": request_id})
-    except Exception as exc:
-        _status_code, error_code, message = _public(exc)
-        del _status_code
-        error_detail = redact_secrets(str(exc))
-        yield sse("error", error_payload(request_id, error_code, message))
+    with service.tracer.root(
+        "ask",
+        seed=request_id,
+        tags=("ask",),
+        environment=profile,
+        input={"query": body.query},
+    ) as root:
+        trace = service.tracer.trace()
+        try:
+            for event in service.ask_stream(
+                body.query,
+                metadata_filter=metadata,
+                top_n=body.top_n,
+                top_k=body.top_k,
+                trace=trace,
+            ):
+                if isinstance(event, AskStatus):
+                    yield sse("status", status_payload(event, request_id))
+                elif isinstance(event, AskDelta):
+                    yield sse("delta", {"request_id": request_id, "text": event.text})
+                elif isinstance(event, AskResult):
+                    routed = event.routed
+                    route = routed.route
+                    decided_by = routed.decided_by
+                    reason = routed.reason
+                    root.set_output(routed_output(routed))
+                    latency_ms = (time.perf_counter() - started) * 1000
+                    yield sse(
+                        "answer",
+                        ask_payload(routed, request_id=request_id, latency_ms=latency_ms),
+                    )
+                    yield sse(
+                        "trace",
+                        trace_event_payload(
+                            trace,
+                            request_id,
+                            langfuse_trace_id=root.trace_id,
+                        ),
+                    )
+                    yield sse("done", {"request_id": request_id})
+        except Exception as exc:
+            root.fail(str(exc))
+            _status_code, error_code, message = _public(exc)
+            del _status_code
+            error_detail = redact_secrets(str(exc))
+            yield sse("error", error_payload(request_id, error_code, message))
     latency_ms = (time.perf_counter() - started) * 1000
     log_request(
         logger,

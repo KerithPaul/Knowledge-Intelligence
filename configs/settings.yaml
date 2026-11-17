@@ -76,6 +76,15 @@ serving:
   log_level: info
   profile: local
 
+# Off until both keys are in .env and this flag is true.
+# LANGFUSE__ENABLED=true turns it on without editing this file.
+# LANGFUSE__BASE_URL overrides the region. US is
+# https://us.cloud.langfuse.com. The keys are LANGFUSE_PUBLIC_KEY and
+# LANGFUSE_SECRET_KEY. They are secrets and stay in .env.
+langfuse:
+  enabled: false
+  base_url: https://cloud.langfuse.com
+
 routing:
   # Best cross-encoder probability required before the model is called.
   # The reranker score is in (0, 1). Below this, the ask path returns the

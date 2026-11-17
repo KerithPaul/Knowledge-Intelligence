@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from rag.core.interfaces import EmbeddingClient, LLMClient
-from rag.core.trace import RequestTrace
+from rag.core.trace import RequestTrace, SpanSink
 from rag.evaluation.crosscheck import DIVERGENCES, Divergence
 from rag.evaluation.generation import score_answer
 from rag.evaluation.operational import (
@@ -130,17 +130,19 @@ def run_case(
     max_context_chunks: int,
     max_tokens: int,
     factual_weight: float,
+    sink: SpanSink | None = None,
 ) -> CaseResult:
     """Ask one question, judge it when a reference exists, and pack the row.
 
     ``ask`` is ``router.ask`` without the extra keyword arguments. The trace
     it receives is the same trace the judges write on, so token totals include
-    both the answer and the judges.
+    both the answer and the judges. The command opens the root trace. This
+    function only attaches ``sink`` so a unit test can call it alone.
     """
 
     if relevance_questions <= 0 or max_context_chunks <= 0 or max_tokens <= 0:
         raise ValueError("judge limits must be positive")
-    trace = RequestTrace()
+    trace = RequestTrace(sink=sink)
     started = time.perf_counter()
     routed = ask(case.query, trace)
     if routed.query != case.query:

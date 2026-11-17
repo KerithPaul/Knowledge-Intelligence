@@ -9,6 +9,7 @@ import threading
 from collections.abc import Callable, Iterator
 
 from rag.core.config import Settings
+from rag.core.observability import Tracer, open_tracer
 from rag.core.trace import RequestTrace
 from rag.retrieval.filters import MetadataFilter
 from rag.routing.events import AskDelta, AskResult, AskStatus
@@ -31,16 +32,40 @@ class Service:
     ) -> None:
         self.settings = settings
         self._router = router
-        self._ingest = ingest if ingest is not None else (lambda: run_ingest(settings))
+        self._ingest = ingest
         self._health = health if health is not None else (lambda: check_health(settings))
         self._lock = threading.Lock()
+        self._tracer: Tracer | None = None
+
+    @property
+    def tracer(self) -> Tracer:
+        """The exporter for this process. The first ask or ingest builds it.
+
+        ``/health`` does not call this. A missing flag or a missing key stays
+        a null tracer and does not import Langfuse.
+        """
+
+        if self._tracer is None:
+            self._tracer = open_tracer(self.settings)
+        return self._tracer
+
+    def flush_tracer(self) -> None:
+        """Send buffered observations when the process stops.
+
+        A process that never asked or ingested has nothing to send.
+        """
+
+        if self._tracer is not None:
+            self._tracer.flush()
 
     def health(self) -> HealthReport:
         return self._health()
 
-    def ingest(self) -> IngestReport:
+    def ingest(self, *, trace: RequestTrace | None = None) -> IngestReport:
         with self._lock:
-            return self._ingest()
+            if self._ingest is not None:
+                return self._ingest()
+            return run_ingest(self.settings, trace=trace)
 
     def ask(
         self,

@@ -8,13 +8,12 @@ bi-encoder prefix belongs on the dense query vector only.
 """
 
 import math
-import time
 from collections.abc import Sequence
 from typing import Any, Protocol
 
 from rag.core.errors import RetrievalError
 from rag.core.interfaces import Reranker
-from rag.core.trace import RequestTrace
+from rag.core.trace import RequestTrace, open_span
 
 
 class PairScorer(Protocol):
@@ -72,22 +71,19 @@ class BGEReranker(Reranker):
             if not isinstance(passage, str) or not passage.strip():
                 raise ValueError(f"passage at index {index} is empty")
         pairs = [(cleaned, passage) for passage in passages]
-        started = time.perf_counter()
-        try:
-            raw = self._load().predict(
-                pairs,
-                batch_size=self._batch_size,
-                show_progress_bar=False,
-            )
-        except RetrievalError:
-            raise
-        except Exception as exc:
-            raise RetrievalError(str(exc)) from None
-        scores = _as_scores(raw, expected=len(passages))
-        if trace is not None:
-            trace.record(
-                "retrieval.rerank",
-                (time.perf_counter() - started) * 1000,
+        with open_span(trace, "retrieval.rerank", observation="span") as span:
+            try:
+                raw = self._load().predict(
+                    pairs,
+                    batch_size=self._batch_size,
+                    show_progress_bar=False,
+                )
+            except RetrievalError:
+                raise
+            except Exception as exc:
+                raise RetrievalError(str(exc)) from None
+            scores = _as_scores(raw, expected=len(passages))
+            span.set(
                 model=self._model_name,
                 count=len(passages),
                 max_length=self._max_length,

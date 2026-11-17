@@ -13,9 +13,11 @@ Examples:
 """
 
 import argparse
+import uuid
 
 from rag.core.config import get_settings
 from rag.core.errors import GenerationError
+from rag.core.observability import routed_output, tracing
 from rag.evaluation.routing import (
     DEFAULT_ROUTING_GOLDEN,
     DEFAULT_ROUTING_REPORT,
@@ -39,35 +41,55 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit("pass a query or --eval")
     settings = get_settings()
     router = open_router(settings)
-    if args.eval:
-        cases = load_routing_cases(DEFAULT_ROUTING_GOLDEN)
-        rows: list[RoutingObservation] = []
-        for case in cases:
-            try:
-                routed = router.ask(case.query)
-            except GenerationError as exc:
-                raise SystemExit(f"could not read the model reply: {exc}") from None
-            rows.append(_observation(case.query, case.corpus_can_answer, routed))
-        report = score_routing(rows, threshold=settings.routing.sufficiency_threshold)
-        write_routing_report(report, DEFAULT_ROUTING_REPORT)
-        _print_report(report)
-        return
-    metadata = MetadataFilter(
-        sources=tuple(args.source),
-        doc_titles=tuple(args.doc_title),
-        chunk_ids=tuple(args.chunk_id),
-        heading=args.heading,
-    )
-    try:
-        routed = router.ask(
-            args.query,
-            metadata_filter=None if metadata.is_empty() else metadata,
-            top_n=args.top_n,
-            top_k=args.top_k,
+    with tracing(settings) as tracer:
+        if args.eval:
+            cases = load_routing_cases(DEFAULT_ROUTING_GOLDEN)
+            rows: list[RoutingObservation] = []
+            for case in cases:
+                with tracer.root(
+                    "ask",
+                    seed=uuid.uuid4().hex,
+                    tags=("evaluation",),
+                    environment="evaluation",
+                    input={"query": case.query},
+                ) as root:
+                    try:
+                        routed = router.ask(case.query, trace=tracer.trace())
+                    except GenerationError as exc:
+                        root.fail(str(exc))
+                        raise SystemExit(f"could not read the model reply: {exc}") from None
+                    root.set_output(routed_output(routed))
+                    rows.append(_observation(case.query, case.corpus_can_answer, routed))
+            report = score_routing(rows, threshold=settings.routing.sufficiency_threshold)
+            write_routing_report(report, DEFAULT_ROUTING_REPORT)
+            _print_report(report)
+            return
+        metadata = MetadataFilter(
+            sources=tuple(args.source),
+            doc_titles=tuple(args.doc_title),
+            chunk_ids=tuple(args.chunk_id),
+            heading=args.heading,
         )
-    except GenerationError as exc:
-        raise SystemExit(f"could not read the model reply: {exc}") from None
-    _print_routed(routed)
+        with tracer.root(
+            "ask",
+            seed=uuid.uuid4().hex,
+            tags=("cli",),
+            environment="cli",
+            input={"query": args.query},
+        ) as root:
+            try:
+                routed = router.ask(
+                    args.query,
+                    metadata_filter=None if metadata.is_empty() else metadata,
+                    top_n=args.top_n,
+                    top_k=args.top_k,
+                    trace=tracer.trace(),
+                )
+            except GenerationError as exc:
+                root.fail(str(exc))
+                raise SystemExit(f"could not read the model reply: {exc}") from None
+            root.set_output(routed_output(routed))
+        _print_routed(routed)
 
 
 def _observation(query: str, corpus_can_answer: bool, routed: RoutedAnswer) -> RoutingObservation:

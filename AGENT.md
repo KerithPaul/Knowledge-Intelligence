@@ -49,7 +49,11 @@ exposes `/health`, `/ask`, and `/ingest`. `/ask` with `"stream": true` is
 server-sent events. Those text events are the grounded answer. Raw model
 tokens stay in the process until the citation rules accept or replace them.
 `/ingest` rewrites `data/processed` and reindexes Qdrant. Compose profile
-`docker` runs the API beside Qdrant.
+`docker` runs the API beside Qdrant. Langfuse tracing is in and stays off
+unless `langfuse.enabled` is true and both `LANGFUSE_PUBLIC_KEY` and
+`LANGFUSE_SECRET_KEY` are set. `LANGFUSE__ENABLED` and `LANGFUSE__BASE_URL`
+override the YAML. HyDE, semantic cache, guardrails, and the CI eval-gate
+are not started.
 
 ---
 
@@ -69,8 +73,9 @@ tokens stay in the process until the citation rules accept or replace them.
 6. **Swap-ability is a hard constraint.** LLM, embeddings, and the reranker live
    behind client interfaces (`LLMClient`, `EmbeddingClient`, `Reranker`) so providers
    change in exactly one place.
-7. **Secrets never touch code or chat.** Keys come from `.env` (GROQ, TAVILY). Never
-   print, log, or echo them; never commit `.env`.
+7. **Secrets never touch code or chat.** Keys come from `.env` (GROQ, TAVILY,
+   LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY). Never print, log, or echo them;
+   never commit `.env`.
 8. **Small, verifiable steps.** Prefer a working slice with a test over a big unproven
    change. State what you ran and what the output was — faithfully, including failures.
 
@@ -114,6 +119,10 @@ tokens stay in the process until the citation rules accept or replace them.
 # formula cross-check      .\.venv\Scripts\python.exe -m rag.evaluation --cross-check
 # serve the API            .\.venv\Scripts\python.exe -m rag.serving
 # API plus Qdrant          docker compose --profile docker up -d --build
+# Langfuse stays off until langfuse.enabled is true and both keys are set.
+# LANGFUSE__ENABLED and LANGFUSE__BASE_URL override configs/settings.yaml.
+# There is no separate tracing command. The ask, ingest, and eval commands
+# export when that flag and the keys are on.
 ```
 > Keep this block in sync with reality. An agent that can't find the real command
 > will guess — that's the failure mode this file exists to prevent.
@@ -195,6 +204,7 @@ See **`MAP.md`** for the full index. The short version:
       Qdrant service. *Exit:* `python -m rag.serving` serves those routes.
       A streamed ask that the citation rules reject does not send the raw
       model text.
-- [ ] **P8 Advanced (optional)** — HyDE/multi-query, semantic cache, guardrails, Langfuse.
+- [ ] **P8 Advanced (optional)** — HyDE/multi-query, semantic cache, guardrails,
+      CI eval-gate. Langfuse tracing is in. The rest of this phase is not.
 
 Tick these as phases complete; they are the contract for "progress."

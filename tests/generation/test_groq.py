@@ -192,7 +192,9 @@ def test_stream_error_is_redacted_and_empty_text_is_an_error() -> None:
     blank = _client(_StreamCompletions([_stream_chunk("  ")]))
     with pytest.raises(LLMError, match="empty"):
         list(blank.stream([LLMMessage(role="user", content="ping")], trace=trace))
-    assert trace.spans == []
+    assert [span.name for span in trace.spans] == ["llm.stream"]
+    assert trace.spans[0].attributes["error"] == "LLMError"
+    assert "answer" not in trace.spans[0].attributes
 
 
 def test_factory_rejects_unknown_provider(tmp_path, monkeypatch) -> None:

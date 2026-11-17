@@ -35,7 +35,7 @@ knowledge-intelligence/
 
 | Subpackage | Responsibility | Phase |
 |---|---|---|
-| `core/` | `config.py` (YAML + `.env`), `interfaces.py`, `clients.py` (the provider switch), `trace.py`, `errors.py`, `redact.py` | P0 |
+| `core/` | `config.py` (YAML + `.env`), `interfaces.py`, `clients.py` (the provider switch), `trace.py`, `observability.py` (optional Langfuse sink), `errors.py`, `redact.py` | P0; Langfuse export is optional |
 | `ingestion.py` | `ingest_corpus` reads `data/raw`, chunks, and can write `data/processed` | P1 |
 | `parsing/` | `parsing/markdown.py` — frontmatter, heading paths, fenced blocks | P1 |
 | `chunking/` | `chunking/chunker.py`, `tokens.py`, `stats.py` — pack blocks and measure splits | P1 |

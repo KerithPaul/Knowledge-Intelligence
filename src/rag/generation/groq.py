@@ -9,7 +9,7 @@ from openai import OpenAI
 from rag.core.errors import LLMError, MissingSecretError
 from rag.core.interfaces import LLMClient, LLMMessage, LLMResponse, LLMStreamEvent
 from rag.core.redact import redact_secrets
-from rag.core.trace import RequestTrace
+from rag.core.trace import RequestTrace, open_span
 
 _ROLES = frozenset({"system", "user", "assistant"})
 
@@ -94,41 +94,38 @@ class GroqLLMClient(LLMClient):
             stream=False,
         )
         started = time.perf_counter()
-        try:
-            response = self._client.chat.completions.create(**kwargs)
-        except Exception as exc:
-            raise LLMError(self._safe(exc)) from None
-        latency_ms = (time.perf_counter() - started) * 1000
+        with open_span(trace, "llm.complete", observation="generation") as span:
+            try:
+                response = self._client.chat.completions.create(**kwargs)
+            except Exception as exc:
+                raise LLMError(self._safe(exc)) from None
 
-        choices = getattr(response, "choices", None) or []
-        if not choices:
-            raise LLMError("model returned no choices")
-        message = choices[0].message
-        content = _message_text(message).strip()
-        if not content:
-            raise LLMError("model returned an empty answer")
+            choices = getattr(response, "choices", None) or []
+            if not choices:
+                raise LLMError("model returned no choices")
+            message = choices[0].message
+            content = _message_text(message).strip()
+            if not content:
+                raise LLMError("model returned an empty answer")
 
-        usage = getattr(response, "usage", None)
-        prompt_tokens = _usage_count(usage, "prompt_tokens")
-        completion_tokens = _usage_count(usage, "completion_tokens")
-        model_name = str(getattr(response, "model", None) or self._model)
-        result = LLMResponse(
-            content=content,
-            model=model_name,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            latency_ms=latency_ms,
-        )
-        if trace is not None:
-            trace.record(
-                "llm.complete",
-                latency_ms,
+            usage = getattr(response, "usage", None)
+            prompt_tokens = _usage_count(usage, "prompt_tokens")
+            completion_tokens = _usage_count(usage, "completion_tokens")
+            model_name = str(getattr(response, "model", None) or self._model)
+            result = LLMResponse(
+                content=content,
+                model=model_name,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                latency_ms=(time.perf_counter() - started) * 1000,
+            )
+            span.set(
                 model=result.model,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 finish_reason=getattr(choices[0], "finish_reason", None),
             )
-        return result
+            return result
 
     def stream(
         self,
@@ -151,47 +148,43 @@ class GroqLLMClient(LLMClient):
             max_tokens=max_tokens,
             stream=True,
         )
-        started = time.perf_counter()
         raw: list[str] = []
         pieces: list[LLMStreamEvent] = []
         model_name = self._model
         finish_reason: str | None = None
         prompt_tokens: int | None = None
         completion_tokens: int | None = None
-        try:
-            response = self._client.chat.completions.create(**kwargs)
-            for chunk in response:
-                model_name = str(getattr(chunk, "model", None) or model_name)
-                usage = getattr(chunk, "usage", None)
-                seen_prompt = _usage_count(usage, "prompt_tokens")
-                seen_completion = _usage_count(usage, "completion_tokens")
-                if seen_prompt is not None:
-                    prompt_tokens = seen_prompt
-                if seen_completion is not None:
-                    completion_tokens = seen_completion
-                choices = getattr(chunk, "choices", None) or []
-                if not choices:
-                    continue
-                choice = choices[0]
-                reason = getattr(choice, "finish_reason", None)
-                if reason:
-                    finish_reason = str(reason)
-                text = _message_text(getattr(choice, "delta", None))
-                if not text:
-                    continue
-                raw.append(text)
-                pieces.append(LLMStreamEvent(text=text, done=False, model=model_name))
-        except Exception as exc:
-            raise LLMError(self._safe(exc)) from None
-        # Hold the pieces until the call finishes. A failed call must not
-        # look like a partial answer, and an empty reply is an error.
-        if not "".join(raw).strip():
-            raise LLMError("model returned an empty answer")
-        latency_ms = (time.perf_counter() - started) * 1000
-        if trace is not None:
-            trace.record(
-                "llm.stream",
-                latency_ms,
+        with open_span(trace, "llm.stream", observation="generation") as span:
+            try:
+                response = self._client.chat.completions.create(**kwargs)
+                for chunk in response:
+                    model_name = str(getattr(chunk, "model", None) or model_name)
+                    usage = getattr(chunk, "usage", None)
+                    seen_prompt = _usage_count(usage, "prompt_tokens")
+                    seen_completion = _usage_count(usage, "completion_tokens")
+                    if seen_prompt is not None:
+                        prompt_tokens = seen_prompt
+                    if seen_completion is not None:
+                        completion_tokens = seen_completion
+                    choices = getattr(chunk, "choices", None) or []
+                    if not choices:
+                        continue
+                    choice = choices[0]
+                    reason = getattr(choice, "finish_reason", None)
+                    if reason:
+                        finish_reason = str(reason)
+                    text = _message_text(getattr(choice, "delta", None))
+                    if not text:
+                        continue
+                    raw.append(text)
+                    pieces.append(LLMStreamEvent(text=text, done=False, model=model_name))
+            except Exception as exc:
+                raise LLMError(self._safe(exc)) from None
+            # Hold the pieces until the call finishes. A failed call must not
+            # look like a partial answer, and an empty reply is an error.
+            if not "".join(raw).strip():
+                raise LLMError("model returned an empty answer")
+            span.set(
                 model=model_name,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,

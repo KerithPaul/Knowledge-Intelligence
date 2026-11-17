@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from rag.core.config import PROJECT_ROOT, Settings
-from rag.core.trace import RequestTrace
+from rag.core.trace import RequestTrace, open_span
 from rag.indexing.indexer import IndexStats, index_processed
 from rag.ingestion import IngestResult, ingest_corpus, write_ingest_result
 
@@ -36,26 +36,29 @@ def run_ingest(
     *,
     raw_dir: Path | None = None,
     processed_dir: Path | None = None,
+    trace: RequestTrace | None = None,
 ) -> IngestReport:
-    """Ingest `data/raw` and index `data/processed` unless paths are passed."""
+    """Ingest `data/raw` and index `data/processed` unless paths are passed.
+
+    A caller that already opened a trace passes it in. The corpus step and
+    the index step are siblings on that trace.
+    """
 
     raw = raw_dir if raw_dir is not None else PROJECT_ROOT / "data" / "raw"
     processed = processed_dir if processed_dir is not None else PROJECT_ROOT / "data" / "processed"
     started = time.perf_counter()
-    trace = RequestTrace()
-    corpus_started = time.perf_counter()
-    result = ingest_corpus(raw, settings)
-    trace.record(
-        "ingest.corpus",
-        (time.perf_counter() - corpus_started) * 1000,
-        documents=len(result.documents),
-        chunks=len(result.chunks),
-        orphan_rate=result.stats.orphan_rate,
-        code_split_rate=result.stats.code_split_rate,
-    )
+    owned = trace if trace is not None else RequestTrace()
+    with open_span(owned, "ingest.corpus", observation="span") as span:
+        result = ingest_corpus(raw, settings)
+        span.set(
+            documents=len(result.documents),
+            chunks=len(result.chunks),
+            orphan_rate=result.stats.orphan_rate,
+            code_split_rate=result.stats.code_split_rate,
+        )
     write_ingest_result(result, processed)
-    stats = index_processed(processed, settings, trace=trace)
-    return _report(result, stats, trace, latency_ms=(time.perf_counter() - started) * 1000)
+    stats = index_processed(processed, settings, trace=owned)
+    return _report(result, stats, owned, latency_ms=(time.perf_counter() - started) * 1000)
 
 
 def _report(

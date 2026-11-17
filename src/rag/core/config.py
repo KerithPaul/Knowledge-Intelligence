@@ -117,6 +117,18 @@ class RoutingSettings(BaseModel):
     sufficiency_threshold: float = Field(ge=0.0, le=1.0)
 
 
+class LangfuseSettings(BaseModel):
+    """Optional export of request spans.
+
+    `enabled` alone does nothing. `open_tracer` also requires both keys in
+    `.env`. The base URL is the Langfuse region or a later self-hosted server.
+    It is not a secret.
+    """
+
+    enabled: bool = False
+    base_url: str = Field(default="https://cloud.langfuse.com", min_length=1)
+
+
 class ServingSettings(BaseModel):
     """How the API process listens.
 
@@ -198,6 +210,8 @@ class Settings(BaseSettings):
 
     groq_api_key: SecretStr | None = None
     tavily_api_key: SecretStr | None = None
+    langfuse_public_key: SecretStr | None = None
+    langfuse_secret_key: SecretStr | None = None
     llm: LLMSettings
     embeddings: EmbeddingSettings
     reranker: RerankerSettings
@@ -207,6 +221,7 @@ class Settings(BaseSettings):
     routing: RoutingSettings
     evaluation: EvaluationSettings = Field(default_factory=EvaluationSettings)
     serving: ServingSettings = Field(default_factory=ServingSettings)
+    langfuse: LangfuseSettings = Field(default_factory=LangfuseSettings)
     qdrant: QdrantSettings
 
     @classmethod
